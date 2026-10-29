@@ -4,6 +4,7 @@
   1) 20일선 근접: 현재가가 20일 이동평균의 ±NEAR_PCT % 안에 있음
   2) RSI(14) 가 RSI_MAX 이하
 두 조건을 모두 만족하면 알림. 같은 종목은 하루에 한 번만 보냄.
+평일 08:00~20:00 (프리마켓·정규장·애프터마켓) 동안만 확인.
 
 환경변수
   NTFY_TOPIC  (필수) 폰 ntfy 앱에서 구독한 토픽 이름
@@ -129,7 +130,7 @@ def main():
     today = now.strftime("%Y-%m-%d")
     if not test:
         hm = now.hour * 100 + now.minute
-        if now.weekday() >= 5 or not (900 <= hm <= 1530):
+        if now.weekday() >= 5 or not (800 <= hm <= 2000):
             print(f"장 시간이 아니라 건너뜀 ({now:%m-%d %H:%M} KST)")
             return
 
