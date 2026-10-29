@@ -29,7 +29,7 @@ RSI_DAYS = 14
 NEAR_PCT = 2.0   # 20일선 ±2% 이내면 "근접"
 RSI_MAX = 30.0
 REPEAT_MIN = 60  # 조건이 이어지는 동안 이 간격(분)마다 다시 알림
-LEVEL_PCT = 2.0  # 볼린저 상단·하단, 20일선에 이 % 안으로 다가오면 알림 (선마다 하루 한 번)
+LEVEL_PCT = 2.0  # 볼린저 상단·하단, 20일선에 이 % 안으로 다가오면 알림 (같은 선은 1시간 지나 다시 오면 또 알림)
 # --------------------------
 
 ROOT = Path(__file__).parent
@@ -319,7 +319,7 @@ def main():
         for lname, lv in levels:
             gap = (lv - px) / px * 100
             key = f"lvl:{s['code']}:{lname}"
-            if abs(gap) <= LEVEL_PCT and key not in last_sent:
+            if abs(gap) <= LEVEL_PCT and due(key):
                 near.append((lname, lv, gap))
                 last_sent[key] = now.isoformat(timespec="minutes")
         if not near:
@@ -352,7 +352,7 @@ def main():
         lo, hi, now_px = min(path), max(path), path[-1]
         for L in s["lines"]:
             key = f"line:{s['code']}:{L:g}"
-            if key in last_sent or not (lo <= L <= hi):
+            if not due(key) or not (lo <= L <= hi):
                 continue
             from_below = start < L
             how = "아래에서 올라와" if from_below else "위에서 내려와"
