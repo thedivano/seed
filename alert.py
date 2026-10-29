@@ -92,6 +92,45 @@ def fetch_candles(code, days=420):
     return candles
 
 
+def _num(x):
+    try:
+        return float(str(x).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_quote(code):
+    """네이버 실시간 현재가. 프리·애프터마켓(넥스트레이드) 시간에는 그 가격을 돌려줌.
+    {"price", "open", "high", "low", "session"} 또는 None"""
+    try:
+        r = requests.get(f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code}", headers=UA, timeout=10)
+        d = r.json()["datas"][0]
+    except Exception:
+        return None
+    over = d.get("overMarketPriceInfo") or {}
+    if over.get("overMarketStatus") == "OPEN" and _num(over.get("overPrice")):
+        src, session = over, over.get("tradingSessionType", "OVER")
+        price = _num(over.get("overPrice"))
+    elif d.get("marketStatus") == "OPEN":
+        src, session, price = d, "REGULAR", _num(d.get("closePrice"))
+    else:
+        return None  # 장이 닫혀 있음
+    return {"price": price, "open": _num(src.get("openPrice")) or price,
+            "high": _num(src.get("highPrice")) or price, "low": _num(src.get("lowPrice")) or price,
+            "session": session}
+
+
+def merge_live(candles, q, today_ymd):
+    """일봉 끝에 오늘 일봉을 실시간 현재가로 맞춰 넣음 (프리마켓엔 일봉이 아직 없어서 새로 만듦)."""
+    if not q:
+        return candles
+    if candles and candles[-1][0] == today_ymd:
+        c = list(candles[-1])
+        c[2], c[3], c[4] = max(c[2], q["price"]), min(c[3], q["price"]), q["price"]
+        return candles[:-1] + [c]
+    return candles + [[today_ymd, q["open"], max(q["high"], q["price"]), min(q["low"], q["price"]), q["price"], 0]]
+
+
 def fetch_fchart(code, timeframe, count):
     """네이버 차트 데이터. 분봉은 종가와 '그날 누적' 거래량만 옴."""
     res = requests.get(
@@ -280,7 +319,7 @@ def main():
     market_checked = False
     for s in load_watchlist():
         try:
-            candles = fetch_candles(s["code"])
+            candles = merge_live(fetch_candles(s["code"]), fetch_quote(s["code"]), today_ymd)
             closes = [c[4] for c in candles]
             last_date = candles[-1][0] if candles else ""
             chart[s["code"]] = {"name": s["name"], "day": candles[-CHART_DAYS:]}
@@ -358,10 +397,17 @@ def main():
         m1 = [b for b in item.get("m1", []) if b[0][:8] == today_ymd]
         prev = [b for b in m1 if b[0] <= since]
         new = [b for b in m1 if b[0] > since]
-        if not new:
+        live = item["day"][-1][4] if item.get("day") and item["day"][-1][0] == today_ymd else None
+        last_px = last_sent.get(f"_px:{s['code']}")
+        if new:
+            start = prev[-1][4] if prev else (last_px or new[0][4])
+            path = [start] + [b[4] for b in new] + ([live] if live else [])
+        elif live and last_px:
+            path = [last_px, live]  # 분봉이 없는 프리마켓: 지난 확인 가격 → 지금 가격
+        else:
+            if live:
+                last_sent[f"_px:{s['code']}"] = live
             continue
-        start = prev[-1][4] if prev else new[0][4]
-        path = [start] + [b[4] for b in new]
         lo, hi, now_px = min(path), max(path), path[-1]
         for L in s["lines"]:
             key = f"line:{s['code']}:{L:g}"
@@ -381,6 +427,7 @@ def main():
                 send_ntfy(topic, title, msg, code=s["code"], high=True)
             last_sent[key] = now.isoformat(timespec="minutes")
             print(f"[알림선] {title}")
+        last_sent[f"_px:{s['code']}"] = now_px
     if not chart_only:
         last_sent["_checked"] = max([b[0] for it in chart.values() for b in it.get("m1", [])] or [since])
 

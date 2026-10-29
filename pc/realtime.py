@@ -313,8 +313,8 @@ def ws_loop():
 
 # ---------- 1분 시세 확인 (장외 시간, 웹소켓이 조용할 때) ----------
 def latest_price(code):
-    rows = alert.fetch_fchart(code, "minute", 3)
-    return rows[-1][4] if rows else None
+    q = alert.fetch_quote(code)  # 프리·애프터마켓 가격까지 나옴
+    return q["price"] if q else None
 
 
 def poll_loop():
