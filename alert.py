@@ -3,7 +3,7 @@
 조건 (config 값은 아래에서 바꿀 수 있음)
   1) 20일선 근접: 현재가가 20일 이동평균의 ±NEAR_PCT % 안에 있음
   2) RSI(14) 가 RSI_MAX 이하
-두 조건을 모두 만족하면 알림. 같은 종목은 하루에 한 번만 보냄.
+두 조건을 모두 만족하면 알림. 조건이 이어지는 동안은 1시간마다 다시 알림.
 평일 08:00~20:00 (프리마켓·정규장·애프터마켓) 동안만 확인.
 
 환경변수
@@ -26,6 +26,7 @@ MA_DAYS = 20
 RSI_DAYS = 14
 NEAR_PCT = 2.0   # 20일선 ±2% 이내면 "근접"
 RSI_MAX = 30.0
+REPEAT_MIN = 60  # 조건이 이어지는 동안 이 간격(분)마다 다시 알림
 # --------------------------
 
 ROOT = Path(__file__).parent
@@ -135,10 +136,17 @@ def main():
             print(f"장 시간이 아니라 건너뜀 ({now:%m-%d %H:%M} KST)")
             return
 
-    state = load_state()
-    sent_today = set(state.get(today, []))
-    # 오늘 기록만 남김
-    state = {today: sorted(sent_today)}
+    # 기록: {"날짜": {"종목코드": "마지막 알림 시각"}} — 오늘 것만 남김
+    old = load_state().get(today, {})
+    last_sent = old if isinstance(old, dict) else {}
+    state = {today: last_sent}
+
+    def due(code):
+        t = last_sent.get(code)
+        if not t:
+            return True
+        # 예약 실행이 몇 분 늦을 수 있어서 5분 여유를 둠
+        return now - datetime.fromisoformat(t) >= timedelta(minutes=REPEAT_MIN - 5)
 
     report, hits = [], []
     today_ymd = now.strftime("%Y%m%d")
@@ -172,20 +180,21 @@ def main():
         print(line, "← 조건 충족" if near and low else "")
         report.append(line)
 
-        if near and low and s["code"] not in sent_today:
+        if near and low and due(s["code"]):
             hits.append((s, line))
         time.sleep(0.3)
 
     for s, line in hits:
-        send_ntfy(topic, f"매수 조건 도달: {s['name']}", line, code=s["code"], high=True)
-        sent_today.add(s["code"])
-        print(f"[알림] {s['name']}")
+        again = s["code"] in last_sent
+        title = f"{'계속 ' if again else ''}매수 조건: {s['name']}"
+        send_ntfy(topic, title, line, code=s["code"], high=not again)
+        last_sent[s["code"]] = now.isoformat(timespec="minutes")
+        print(f"[알림] {title}")
 
     if test:
         send_ntfy(topic, "시드 알림 테스트", "\n".join(report) or "관심종목이 비어 있어요")
         print("[테스트] 현재 상태 알림 보냄")
 
-    state[today] = sorted(sent_today)
     save_state(state)
 
 
