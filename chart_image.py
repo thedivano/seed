@@ -39,7 +39,7 @@ def _bb(closes, n=20, k=2):
     return up, lo
 
 
-def daily_chart_png(code, rows, subtitle=""):
+def daily_chart_png(code, rows, subtitle="", hlines=()):
     """rows: [[YYYYMMDD, 시가, 고가, 저가, 종가, 거래량], ...] 오래된 순."""
     closes = [r[4] for r in rows]
     mas = {n: _ma(closes, n) for n in MA_COLORS}
@@ -72,6 +72,14 @@ def daily_chart_png(code, rows, subtitle=""):
 
     last = view[-1][4]
     ax.axhline(last, color="#18211d", lw=0.6, ls=":")
+    # 내가 그린 알림선: 현재가보다 위면 빨강, 아래면 파랑
+    lo_v, hi_v = ax.get_ylim()
+    for L in hlines:
+        col = UP if L >= last else DOWN
+        ax.axhline(L, color=col, lw=1.6)
+        ax.annotate(f"{L:,.0f}", xy=(0, L), xytext=(2, 3), textcoords="offset points", color=col, fontsize=8, fontweight="bold")
+        lo_v, hi_v = min(lo_v, L), max(hi_v, L)
+    ax.set_ylim(lo_v, hi_v)
     ax.annotate(f"{last:,.0f}", xy=(len(view) - 1, last), xytext=(6, 0), textcoords="offset points",
                 va="center", fontsize=9, fontweight="bold")
 

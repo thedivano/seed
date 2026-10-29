@@ -50,8 +50,15 @@ def load_watchlist():
         for r in csv.DictReader(f):
             code = (r.get("종목코드") or "").strip().zfill(6)
             name = (r.get("종목명") or "").strip()
+            lines = []
+            for x in (r.get("알림선") or "").replace(",", "/").split("/"):
+                try:
+                    if x.strip():
+                        lines.append(float(x.strip()))
+                except ValueError:
+                    pass
             if code.isdigit() and len(code) == 6:
-                rows.append({"code": code, "name": name or code})
+                rows.append({"code": code, "name": name or code, "lines": lines})
         return rows
 
 
@@ -220,7 +227,6 @@ def chart_extras(chart):
 def save_chart(chart, now):
     if not chart:
         return
-    chart_extras(chart)
     CHART.parent.mkdir(exist_ok=True)
     out = {"updatedAt": now.isoformat(timespec="minutes"), "stocks": chart}
     CHART.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
@@ -293,6 +299,44 @@ def main():
         if near and low and due(s["code"]) and not chart_only:
             hits.append((s, line, candles[-CHART_DAYS:], r))
         time.sleep(0.3)
+
+    # 주봉·분봉 (차트용 + 알림선 확인용)
+    chart_extras(chart)
+
+    # ---------- 내가 그린 알림선에 닿았는지 확인 ----------
+    since = last_sent.get("_checked", "")
+    for s in load_watchlist():
+        item = chart.get(s["code"])
+        if not s["lines"] or not item or chart_only:
+            continue
+        m1 = [b for b in item.get("m1", []) if b[0][:8] == today_ymd]
+        prev = [b for b in m1 if b[0] <= since]
+        new = [b for b in m1 if b[0] > since]
+        if not new:
+            continue
+        start = prev[-1][4] if prev else new[0][4]
+        path = [start] + [b[4] for b in new]
+        lo, hi, now_px = min(path), max(path), path[-1]
+        for L in s["lines"]:
+            key = f"line:{s['code']}:{L:g}"
+            if key in last_sent or not (lo <= L <= hi):
+                continue
+            from_below = start < L
+            how = "아래에서 올라와" if from_below else "위에서 내려와"
+            kind = "저항선" if from_below else "지지선"
+            title = f"알림선 도달: {s['name']} {L:,.0f}원"
+            msg = f"{how} {kind} {L:,.0f}원에 닿았어요 · 지금 {now_px:,.0f}원"
+            try:
+                from chart_image import daily_chart_png
+                png = daily_chart_png(s["code"], item["day"], f"line {L:,.0f}", hlines=s["lines"])
+                send_ntfy_image(topic, title, msg, png, s["code"], high=True)
+            except Exception as e:
+                print(f"[차트 이미지 실패] {e}")
+                send_ntfy(topic, title, msg, code=s["code"], high=True)
+            last_sent[key] = now.isoformat(timespec="minutes")
+            print(f"[알림선] {title}")
+    if not chart_only:
+        last_sent["_checked"] = max([b[0] for it in chart.values() for b in it.get("m1", [])] or [since])
 
     for s, line, rows, r in hits:
         again = s["code"] in last_sent
