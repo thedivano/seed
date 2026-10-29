@@ -64,8 +64,8 @@ jobs:
       - name: 차트 데이터를 chart-data 브랜치에 덮어쓰기 (시드 페이지용)
         run: |
           [ -f data/chart.json ] || exit 0
-          mkdir -p /tmp/chart && cp data/chart.json /tmp/chart/ && cd /tmp/chart
+          mkdir -p /tmp/chart && cp data/*.json /tmp/chart/ && cd /tmp/chart
           git init -q -b chart-data
-          git add chart.json
+          git add *.json
           git -c user.name=seed-bot -c user.email=seed-bot@users.noreply.github.com commit -qm "차트 데이터 $(TZ=Asia/Seoul date '+%m-%d %H:%M')"
           git push -fq "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" chart-data

@@ -315,6 +315,12 @@ def main():
         send_ntfy_image(image_test, f"이미지 점검: {item['name']}", "차트 첨부 확인용",
                         daily_chart_png(code, item["day"], "test"), code)
         print("[점검] 이미지 알림 보냄")
+        try:
+            time.sleep(2)
+            poll = requests.get(f"https://ntfy.sh/{image_test}/json?poll=1", timeout=15).text
+            (ROOT / "data" / "probe.json").write_text(poll, encoding="utf-8")
+        except Exception as e:
+            (ROOT / "data" / "probe.json").write_text(f"poll 실패: {e}", encoding="utf-8")
     if chart_only:
         print("[차트] 차트 데이터만 갱신")
         return
