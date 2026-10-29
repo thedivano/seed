@@ -33,7 +33,11 @@ ROOT = Path(__file__).parent
 WATCHLIST = ROOT / "watchlist.csv"
 STATE = ROOT / "state" / "sent.json"
 CHART = ROOT / "data" / "chart.json"   # 시드 페이지 차트용 일봉 데이터
-CHART_DAYS = 260                       # 저장할 거래일 수 (120일선을 그리려면 넉넉히)
+CHART_DAYS = 260                       # 일봉: 저장할 거래일 수 (120일선을 그리려면 넉넉히)
+CHART_WEEKS = 260                      # 주봉: 약 5년
+CHART_M1 = 1500                        # 1분봉: 최근 2거래일 정도
+CHART_M10 = 600                        # 10분봉
+CHART_M30 = 300                        # 30분봉
 KST = timezone(timedelta(hours=9))
 UA = {"User-Agent": "Mozilla/5.0 (seed-alert)"}
 
@@ -76,6 +80,51 @@ def fetch_candles(code, days=420):
         except (IndexError, TypeError, ValueError):
             continue
     return candles
+
+
+def fetch_fchart(code, timeframe, count):
+    """네이버 차트 데이터. 분봉은 종가와 '그날 누적' 거래량만 옴."""
+    res = requests.get(
+        "https://fchart.stock.naver.com/sise.nhn",
+        params={"symbol": code, "timeframe": timeframe, "count": count, "requestType": 0},
+        headers=UA, timeout=20,
+    )
+    res.raise_for_status()
+    rows = []
+    for part in res.text.split('data="')[1:]:
+        f = part.split('"', 1)[0].split("|")
+        if len(f) < 6 or f[4] in ("", "null"):
+            continue
+        c = float(f[4])
+        num = lambda x: c if x in ("", "null") else float(x)
+        rows.append([f[0], num(f[1]), num(f[2]), num(f[3]), c, int(float(f[5] or 0))])
+    return rows
+
+
+def minute_bars(code):
+    """1분봉(거래량을 분당으로 바꿈)과 10분봉·30분봉."""
+    raw = fetch_fchart(code, "minute", 8000)
+    m1, prev_day, prev_cum = [], None, 0
+    for t, o, h, l, c, cum in raw:
+        day = t[:8]
+        vol = cum if day != prev_day else max(cum - prev_cum, 0)
+        prev_day, prev_cum = day, cum
+        m1.append([t, c, c, c, c, vol])
+
+    def group(n):
+        out = []
+        for t, o, h, l, c, v in m1:
+            mins = int(t[8:10]) * 60 + int(t[10:12])
+            start = mins // n * n
+            key = f"{t[:8]}{start // 60:02d}{start % 60:02d}"
+            if out and out[-1][0] == key:
+                b = out[-1]
+                b[2], b[3], b[4], b[5] = max(b[2], h), min(b[3], l), c, b[5] + v
+            else:
+                out.append([key, o, h, l, c, v])
+        return out
+
+    return m1, group(10), group(30)
 
 
 def sma(values, n):
@@ -127,9 +176,22 @@ def save_state(state):
     STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def chart_extras(chart):
+    """일봉 외에 주봉·분봉을 붙임. 한 종목이 실패해도 일봉은 남김."""
+    for code, item in chart.items():
+        try:
+            item["week"] = fetch_fchart(code, "week", CHART_WEEKS + 5)[-CHART_WEEKS:]
+            m1, m10, m30 = minute_bars(code)
+            item["m1"], item["m10"], item["m30"] = m1[-CHART_M1:], m10[-CHART_M10:], m30[-CHART_M30:]
+        except Exception as e:
+            print(f"[차트 실패] {item['name']}({code}): {e}")
+        time.sleep(0.3)
+
+
 def save_chart(chart, now):
     if not chart:
         return
+    chart_extras(chart)
     CHART.parent.mkdir(exist_ok=True)
     out = {"updatedAt": now.isoformat(timespec="minutes"), "stocks": chart}
     CHART.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
@@ -171,7 +233,7 @@ def main():
             candles = fetch_candles(s["code"])
             closes = [c[4] for c in candles]
             last_date = candles[-1][0] if candles else ""
-            chart[s["code"]] = {"name": s["name"], "candles": candles[-CHART_DAYS:]}
+            chart[s["code"]] = {"name": s["name"], "day": candles[-CHART_DAYS:]}
         except Exception as e:  # 한 종목 실패해도 나머지는 계속
             print(f"[실패] {s['name']}({s['code']}): {e}")
             report.append(f"{s['name']}: 시세를 못 가져옴")
@@ -209,7 +271,10 @@ def main():
         last_sent[s["code"]] = now.isoformat(timespec="minutes")
         print(f"[알림] {title}")
 
-    save_chart(chart, now)
+    # 차트 데이터는 시드 업데이트(16:15, 20:15) 직전 실행 때만 저장 (저장소가 너무 커지지 않게)
+    hm = now.hour * 100 + now.minute
+    if chart_only or test or 1540 <= hm <= 1619 or hm >= 1940:
+        save_chart(chart, now)
     if chart_only:
         print("[차트] 차트 데이터만 갱신")
         return
