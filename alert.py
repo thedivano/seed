@@ -140,10 +140,11 @@ def main():
     if not topic:
         sys.exit("NTFY_TOPIC 이 비어 있어요. GitHub 저장소 Settings → Secrets 에 넣어주세요.")
     test = os.environ.get("TEST_MODE") == "1"
+    chart_only = os.environ.get("CHART_ONLY") == "1"  # 알림 없이 차트 데이터만 갱신
 
     now = datetime.now(KST)
     today = now.strftime("%Y-%m-%d")
-    if not test:
+    if not (test or chart_only):
         hm = now.hour * 100 + now.minute
         if now.weekday() >= 5 or not (800 <= hm <= 2000):
             print(f"장 시간이 아니라 건너뜀 ({now:%m-%d %H:%M} KST)")
@@ -176,7 +177,7 @@ def main():
             report.append(f"{s['name']}: 시세를 못 가져옴")
             continue
         # 공휴일 등 장이 안 열린 날: 9:30이 지나도 오늘 시세가 없으면 전체 건너뜀
-        if not market_checked and not test:
+        if not market_checked and not (test or chart_only):
             market_checked = True
             if last_date != today_ymd and now.hour * 100 + now.minute >= 930:
                 print(f"오늘({today_ymd}) 시세가 없어 휴장일로 보고 건너뜀 (마지막 {last_date})")
@@ -197,7 +198,7 @@ def main():
         print(line, "← 조건 충족" if near and low else "")
         report.append(line)
 
-        if near and low and due(s["code"]):
+        if near and low and due(s["code"]) and not chart_only:
             hits.append((s, line))
         time.sleep(0.3)
 
@@ -209,6 +210,9 @@ def main():
         print(f"[알림] {title}")
 
     save_chart(chart, now)
+    if chart_only:
+        print("[차트] 차트 데이터만 갱신")
+        return
 
     if test:
         send_ntfy(topic, "시드 알림 테스트", "\n".join(report) or "관심종목이 비어 있어요")

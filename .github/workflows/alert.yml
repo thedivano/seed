@@ -12,6 +12,10 @@ on:
         description: "테스트 알림 보내기 (지금 상태를 바로 알림으로)"
         type: boolean
         default: true
+      chart_only:
+        description: "알림 없이 차트 데이터만 갱신"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -37,6 +41,7 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TEST_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.test && '1' || '0' }}
+          CHART_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.chart_only && '1' || '0' }}
         run: python alert.py
 
       - name: 알림 기록과 차트 데이터 저장
