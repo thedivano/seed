@@ -47,7 +47,7 @@ def load_watchlist():
 
 
 def fetch_closes(code, days=120):
-    """네이버 금융 일봉 종가 목록 (오래된 순). 장중에는 마지막 값이 현재가."""
+    """네이버 금융 일봉 (마지막 날짜, 종가 목록[오래된 순]). 장중에는 마지막 값이 현재가."""
     end = datetime.now(KST)
     start = end - timedelta(days=days)
     url = "https://api.finance.naver.com/siseJson.naver"
@@ -62,13 +62,14 @@ def fetch_closes(code, days=120):
     res.raise_for_status()
     # 응답이 작은따옴표를 쓰는 유사 JSON이라 바꿔서 읽음
     data = json.loads(res.text.strip().replace("'", '"'))
-    closes = []
+    closes, last_date = [], ""
     for row in data[1:]:  # 첫 줄은 헤더
         try:
             closes.append(float(row[4]))  # 날짜, 시가, 고가, 저가, 종가, ...
+            last_date = str(row[0]).strip()
         except (IndexError, TypeError, ValueError):
             continue
-    return closes
+    return last_date, closes
 
 
 def sma(values, n):
@@ -140,13 +141,22 @@ def main():
     state = {today: sorted(sent_today)}
 
     report, hits = [], []
+    today_ymd = now.strftime("%Y%m%d")
+    market_checked = False
     for s in load_watchlist():
         try:
-            closes = fetch_closes(s["code"])
+            last_date, closes = fetch_closes(s["code"])
         except Exception as e:  # 한 종목 실패해도 나머지는 계속
             print(f"[실패] {s['name']}({s['code']}): {e}")
             report.append(f"{s['name']}: 시세를 못 가져옴")
             continue
+        # 공휴일 등 장이 안 열린 날: 9:30이 지나도 오늘 시세가 없으면 전체 건너뜀
+        if not market_checked and not test:
+            market_checked = True
+            if last_date != today_ymd and now.hour * 100 + now.minute >= 930:
+                print(f"오늘({today_ymd}) 시세가 없어 휴장일로 보고 건너뜀 (마지막 {last_date})")
+                save_state(state)
+                return
         if len(closes) < MA_DAYS + 1:
             report.append(f"{s['name']}: 데이터 부족")
             continue
