@@ -29,6 +29,7 @@ RSI_DAYS = 14
 NEAR_PCT = 2.0   # 20일선 ±2% 이내면 "근접"
 RSI_MAX = 30.0
 REPEAT_MIN = 60  # 조건이 이어지는 동안 이 간격(분)마다 다시 알림
+LEVEL_PCT = 2.0  # 볼린저 상단·하단, 20일선에 이 % 안으로 다가오면 알림 (선마다 하루 한 번)
 # --------------------------
 
 ROOT = Path(__file__).parent
@@ -302,6 +303,38 @@ def main():
 
     # 주봉·분봉 (차트용 + 알림선 확인용)
     chart_extras(chart)
+
+    # ---------- 볼린저 상단·하단, 20일선에 2% 안으로 다가왔는지 ----------
+    for s in load_watchlist():
+        item = chart.get(s["code"])
+        if not item or chart_only or len(item.get("day", [])) < MA_DAYS:
+            continue
+        closes = [b[4] for b in item["day"]]
+        px = closes[-1]
+        w = closes[-MA_DAYS:]
+        mid = sum(w) / MA_DAYS
+        sd = (sum((x - mid) ** 2 for x in w) / MA_DAYS) ** 0.5
+        levels = [("밴드 상단", mid + 2 * sd), ("20일선", mid), ("밴드 하단", mid - 2 * sd)]
+        near = []
+        for lname, lv in levels:
+            gap = (lv - px) / px * 100
+            key = f"lvl:{s['code']}:{lname}"
+            if abs(gap) <= LEVEL_PCT and key not in last_sent:
+                near.append((lname, lv, gap))
+                last_sent[key] = now.isoformat(timespec="minutes")
+        if not near:
+            continue
+        title = f"근접: {s['name']} " + "·".join(n for n, _, _ in near)
+        msg = " / ".join(f"{n} {lv:,.0f}원까지 {'위로' if g >= 0 else '아래로'} {abs(g):.1f}%" for n, lv, g in near) + f" · 지금 {px:,.0f}원"
+        try:
+            from chart_image import daily_chart_png
+            en = {"밴드 상단": "BB upper", "20일선": "MA20", "밴드 하단": "BB lower"}
+            png = daily_chart_png(s["code"], item["day"], "near " + " / ".join(en[n] for n, _, _ in near), hlines=s["lines"])
+            send_ntfy_image(topic, title, msg, png, s["code"])
+        except Exception as e:
+            print(f"[차트 이미지 실패] {e}")
+            send_ntfy(topic, title, msg, code=s["code"])
+        print(f"[근접] {title}")
 
     # ---------- 내가 그린 알림선에 닿았는지 확인 ----------
     since = last_sent.get("_checked", "")
