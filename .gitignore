@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 state/_t.json
 data/
+pc/config.ini
+pc/state.json
+pc/seed.log

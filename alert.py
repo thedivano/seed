@@ -201,6 +201,15 @@ def send_ntfy_image(topic, title, message, png, code, high=False):
         send_ntfy(topic, title, message, code=code, high=high)
 
 
+def pc_alive(topic):
+    """기숙사 PC의 실시간 감시가 최근 10분 안에 '켜져 있음' 신호를 보냈는지."""
+    try:
+        r = requests.get(f"https://ntfy.sh/{topic}-hb/json", params={"poll": "1", "since": "10m"}, timeout=10)
+        return any('"event":"message"' in line for line in r.text.splitlines())
+    except Exception:
+        return False
+
+
 def load_state():
     try:
         return json.loads(STATE.read_text(encoding="utf-8"))
@@ -253,6 +262,10 @@ def main():
     old = load_state().get(today, {})
     last_sent = old if isinstance(old, dict) else {}
     state = {today: last_sent}
+    # PC 실시간 감시가 켜져 있으면 알림은 PC에 맡기고 여기서는 차트 데이터만 준비 (중복 알림 방지)
+    quiet = chart_only or (not test and pc_alive(topic))
+    if quiet and not chart_only:
+        print("[양보] PC 실시간 감시가 켜져 있어서 알림은 쉬어요")
 
     def due(code):
         t = last_sent.get(code)
@@ -297,7 +310,7 @@ def main():
         print(line, "← 조건 충족" if near and low else "")
         report.append(line)
 
-        if near and low and due(s["code"]) and not chart_only:
+        if near and low and due(s["code"]) and not quiet:
             hits.append((s, line, candles[-CHART_DAYS:], r))
         time.sleep(0.3)
 
@@ -307,7 +320,7 @@ def main():
     # ---------- 볼린저 상단·하단, 20일선에 2% 안으로 다가왔는지 ----------
     for s in load_watchlist():
         item = chart.get(s["code"])
-        if not item or chart_only or len(item.get("day", [])) < MA_DAYS:
+        if not item or quiet or len(item.get("day", [])) < MA_DAYS:
             continue
         closes = [b[4] for b in item["day"]]
         px = closes[-1]
@@ -340,7 +353,7 @@ def main():
     since = last_sent.get("_checked", "")
     for s in load_watchlist():
         item = chart.get(s["code"])
-        if not s["lines"] or not item or chart_only:
+        if not s["lines"] or not item or quiet:
             continue
         m1 = [b for b in item.get("m1", []) if b[0][:8] == today_ymd]
         prev = [b for b in m1 if b[0] <= since]
