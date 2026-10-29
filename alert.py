@@ -32,6 +32,8 @@ REPEAT_MIN = 60  # 조건이 이어지는 동안 이 간격(분)마다 다시 �
 ROOT = Path(__file__).parent
 WATCHLIST = ROOT / "watchlist.csv"
 STATE = ROOT / "state" / "sent.json"
+CHART = ROOT / "data" / "chart.json"   # 시드 페이지 차트용 일봉 데이터
+CHART_DAYS = 260                       # 저장할 거래일 수 (120일선을 그리려면 넉넉히)
 KST = timezone(timedelta(hours=9))
 UA = {"User-Agent": "Mozilla/5.0 (seed-alert)"}
 
@@ -47,8 +49,9 @@ def load_watchlist():
         return rows
 
 
-def fetch_closes(code, days=120):
-    """네이버 금융 일봉 (마지막 날짜, 종가 목록[오래된 순]). 장중에는 마지막 값이 현재가."""
+def fetch_candles(code, days=420):
+    """네이버 금융 일봉 [날짜, 시가, 고가, 저가, 종가, 거래량] 목록 (오래된 순).
+    장중에는 마지막 줄이 지금까지의 오늘 일봉(종가 = 현재가)."""
     end = datetime.now(KST)
     start = end - timedelta(days=days)
     url = "https://api.finance.naver.com/siseJson.naver"
@@ -63,14 +66,16 @@ def fetch_closes(code, days=120):
     res.raise_for_status()
     # 응답이 작은따옴표를 쓰는 유사 JSON이라 바꿔서 읽음
     data = json.loads(res.text.strip().replace("'", '"'))
-    closes, last_date = [], ""
+    candles = []
     for row in data[1:]:  # 첫 줄은 헤더
         try:
-            closes.append(float(row[4]))  # 날짜, 시가, 고가, 저가, 종가, ...
-            last_date = str(row[0]).strip()
+            date = str(row[0]).strip()
+            o, h, l, c = (float(x) for x in row[1:5])
+            v = int(float(row[5])) if len(row) > 5 else 0
+            candles.append([date, o, h, l, c, v])
         except (IndexError, TypeError, ValueError):
             continue
-    return last_date, closes
+    return candles
 
 
 def sma(values, n):
@@ -122,6 +127,14 @@ def save_state(state):
     STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def save_chart(chart, now):
+    if not chart:
+        return
+    CHART.parent.mkdir(exist_ok=True)
+    out = {"updatedAt": now.isoformat(timespec="minutes"), "stocks": chart}
+    CHART.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+
 def main():
     topic = os.environ.get("NTFY_TOPIC", "").strip()
     if not topic:
@@ -149,11 +162,15 @@ def main():
         return now - datetime.fromisoformat(t) >= timedelta(minutes=REPEAT_MIN - 5)
 
     report, hits = [], []
+    chart = {}
     today_ymd = now.strftime("%Y%m%d")
     market_checked = False
     for s in load_watchlist():
         try:
-            last_date, closes = fetch_closes(s["code"])
+            candles = fetch_candles(s["code"])
+            closes = [c[4] for c in candles]
+            last_date = candles[-1][0] if candles else ""
+            chart[s["code"]] = {"name": s["name"], "candles": candles[-CHART_DAYS:]}
         except Exception as e:  # 한 종목 실패해도 나머지는 계속
             print(f"[실패] {s['name']}({s['code']}): {e}")
             report.append(f"{s['name']}: 시세를 못 가져옴")
@@ -190,6 +207,8 @@ def main():
         send_ntfy(topic, title, line, code=s["code"], high=not again)
         last_sent[s["code"]] = now.isoformat(timespec="minutes")
         print(f"[알림] {title}")
+
+    save_chart(chart, now)
 
     if test:
         send_ntfy(topic, "시드 알림 테스트", "\n".join(report) or "관심종목이 비어 있어요")
