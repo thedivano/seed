@@ -19,6 +19,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import base64
+
 import requests
 
 # ---------- 설정 ----------
@@ -164,6 +166,33 @@ def send_ntfy(topic, title, message, code=None, high=False):
     r.raise_for_status()
 
 
+def _h(text):
+    """ntfy 헤더에 한글을 넣으려면 RFC 2047 방식으로 감싸야 함."""
+    return "=?UTF-8?B?" + base64.b64encode(text.encode("utf-8")).decode() + "?="
+
+
+def send_ntfy_image(topic, title, message, png, code, high=False):
+    """차트 이미지를 첨부해서 알림. 실패하면 글자만 보냄."""
+    try:
+        r = requests.put(
+            f"https://ntfy.sh/{topic}",
+            data=png,
+            headers={
+                "Title": _h(title),
+                "Message": _h(message),
+                "Filename": f"{code}.png",
+                "Tags": "chart_with_downwards_trend",
+                "Priority": "4" if high else "3",
+                "Click": f"https://m.stock.naver.com/domestic/stock/{code}/total",
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+    except Exception as e:
+        print(f"[이미지 알림 실패, 글자로 보냄] {e}")
+        send_ntfy(topic, title, message, code=code, high=high)
+
+
 def load_state():
     try:
         return json.loads(STATE.read_text(encoding="utf-8"))
@@ -203,6 +232,7 @@ def main():
         sys.exit("NTFY_TOPIC 이 비어 있어요. GitHub 저장소 Settings → Secrets 에 넣어주세요.")
     test = os.environ.get("TEST_MODE") == "1"
     chart_only = os.environ.get("CHART_ONLY") == "1"  # 알림 없이 차트 데이터만 갱신
+    image_test = os.environ.get("IMAGE_TEST_TOPIC", "").strip()  # 이미지 알림 형식 점검용 임시 토픽
 
     now = datetime.now(KST)
     today = now.strftime("%Y-%m-%d")
@@ -261,20 +291,30 @@ def main():
         report.append(line)
 
         if near and low and due(s["code"]) and not chart_only:
-            hits.append((s, line))
+            hits.append((s, line, candles[-CHART_DAYS:], r))
         time.sleep(0.3)
 
-    for s, line in hits:
+    for s, line, rows, r in hits:
         again = s["code"] in last_sent
         title = f"{'계속 ' if again else ''}매수 조건: {s['name']}"
-        send_ntfy(topic, title, line, code=s["code"], high=not again)
+        try:
+            from chart_image import daily_chart_png
+            png = daily_chart_png(s["code"], rows, f"RSI {r:.1f}")
+            send_ntfy_image(topic, title, line, png, s["code"], high=not again)
+        except Exception as e:
+            print(f"[차트 이미지 실패] {e}")
+            send_ntfy(topic, title, line, code=s["code"], high=not again)
         last_sent[s["code"]] = now.isoformat(timespec="minutes")
         print(f"[알림] {title}")
 
-    # 차트 데이터는 시드 업데이트(16:15, 20:15) 직전 실행 때만 저장 (저장소가 너무 커지지 않게)
-    hm = now.hour * 100 + now.minute
-    if chart_only or test or 1540 <= hm <= 1619 or hm >= 1940:
-        save_chart(chart, now)
+    # 차트 데이터는 매번 저장 (chart-data 브랜치에 덮어써서 저장소가 커지지 않음)
+    save_chart(chart, now)
+    if image_test and chart:
+        from chart_image import daily_chart_png
+        code, item = next(iter(chart.items()))
+        send_ntfy_image(image_test, f"이미지 점검: {item['name']}", "차트 첨부 확인용",
+                        daily_chart_png(code, item["day"], "test"), code)
+        print("[점검] 이미지 알림 보냄")
     if chart_only:
         print("[차트] 차트 데이터만 갱신")
         return
