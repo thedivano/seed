@@ -128,7 +128,11 @@ def fetch_quote(code):
     except Exception:
         return None
     try:
-        KRX[code] = [_num(d.get("closePrice")), _num(d.get("fluctuationsRatio")), d.get("marketStatus", "")]
+        o = d.get("overMarketPriceInfo") or {}
+        close, cmp = _num(d.get("closePrice")), _num(d.get("compareToPreviousClosePrice")) or 0
+        # [정규장 종가, 정규장 등락률, 장 상태, 전일 정규장 종가, 시간외 가격, 시간외 등락률]
+        KRX[code] = [close, _num(d.get("fluctuationsRatio")), d.get("marketStatus", ""), close - cmp,
+                     _num(o.get("overPrice")) or 0, _num(o.get("fluctuationsRatio")) or 0]
         fetch_info(code, d)
     except Exception:
         pass
@@ -375,9 +379,12 @@ def main():
                 chart[s["code"]]["krx"] = KRX[s["code"]]
             if s["code"] in INFO:
                 chart[s["code"]]["info"] = INFO[s["code"]]
-            if len(candles) >= 2:
+            # 등락 기준 = 전일 정규장 종가 (증권사 앱과 같음). 모르면 전날 일봉 종가
+            base = (KRX.get(s["code"]) or [0, 0, 0, 0])[3] or (candles[-2][4] if len(candles) >= 2 else None)
+            if base:
+                chart[s["code"]]["base"] = base
                 NAMES[s["code"]] = s["name"]
-                PRICE_INFO[s["code"]] = (candles[-1][4], (candles[-1][4] - candles[-2][4]) / candles[-2][4] * 100)
+                PRICE_INFO[s["code"]] = (candles[-1][4], (candles[-1][4] - base) / base * 100)
         except Exception as e:  # 한 종목 실패해도 나머지는 계속
             print(f"[실패] {s['name']}({s['code']}): {e}")
             report.append(f"{s['name']}: 시세를 못 가져옴")
@@ -416,7 +423,7 @@ def main():
         item = chart.get(s["code"])
         if not item or quiet or len(item.get("day", [])) < 2 or item["day"][-1][0] != today_ymd:
             continue
-        prev_close, px = item["day"][-2][4], item["day"][-1][4]
+        prev_close, px = item.get("base") or item["day"][-2][4], item["day"][-1][4]
         chg = (px - prev_close) / prev_close * 100
         step = int(chg / STEP_PCT)  # +7.2% → 2, -3.5% → -1
         key = f"step:{s['code']}"
