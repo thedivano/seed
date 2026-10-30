@@ -101,6 +101,22 @@ def _num(x):
 
 
 KRX = {}  # code -> [정규장 종가(장중엔 현재가), 정규장 등락률, 장 상태]
+INFO = {}  # code -> 시드 카드에 보여줄 시세 정보 (네이버가 주는 글자 그대로)
+
+
+def fetch_info(code, d):
+    """정규장 시가·고가·저가·거래량·거래대금 + 52주 최고·최저, PER, PBR."""
+    info = {k: d.get(k, "") for k in ("closePrice", "compareToPreviousClosePrice", "fluctuationsRatio",
+                                        "openPrice", "highPrice", "lowPrice",
+                                        "accumulatedTradingVolume", "accumulatedTradingValue")}
+    try:
+        r = requests.get(f"https://m.stock.naver.com/api/stock/{code}/integration", headers=UA, timeout=10)
+        for t in r.json().get("totalInfos", []):
+            if t.get("code") in ("highPriceOf52Weeks", "lowPriceOf52Weeks", "per", "pbr", "marketValue"):
+                info[t["code"]] = t.get("value", "")
+    except Exception:
+        pass
+    INFO[code] = info
 
 
 def fetch_quote(code):
@@ -113,6 +129,7 @@ def fetch_quote(code):
         return None
     try:
         KRX[code] = [_num(d.get("closePrice")), _num(d.get("fluctuationsRatio")), d.get("marketStatus", "")]
+        fetch_info(code, d)
     except Exception:
         pass
     over = d.get("overMarketPriceInfo") or {}
@@ -356,6 +373,8 @@ def main():
             chart[s["code"]] = {"name": s["name"], "day": candles[-CHART_DAYS:]}
             if s["code"] in KRX:
                 chart[s["code"]]["krx"] = KRX[s["code"]]
+            if s["code"] in INFO:
+                chart[s["code"]]["info"] = INFO[s["code"]]
             if len(candles) >= 2:
                 NAMES[s["code"]] = s["name"]
                 PRICE_INFO[s["code"]] = (candles[-1][4], (candles[-1][4] - candles[-2][4]) / candles[-2][4] * 100)
