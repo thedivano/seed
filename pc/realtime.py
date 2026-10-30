@@ -174,6 +174,7 @@ def evaluate(code, price, prev):
         return
     closes = [x[4] for x in rows]
     if len(rows) >= 2:
+        alert.NAMES[code] = w["name"]
         alert.PRICE_INFO[code] = (price, (price - rows[-2][4]) / rows[-2][4] * 100)
     w20 = closes[-alert.MA_DAYS:]
     ma20 = sum(w20) / alert.MA_DAYS

@@ -203,22 +203,31 @@ def rsi(values, n=14):
 PRICE_INFO = {}  # code -> (현재가, 전일 대비 %) : 모든 알림 맨 위에 붙임
 
 
-def with_price(message, code):
-    info = PRICE_INFO.get(code)
-    if not info:
-        return message
+NAMES = {}       # code -> 종목명
+
+
+def layout(title, message, code):
+    """폰 알림 한 줄에 다 보이게: 제목 = 종목명 현재가 등락률, 본문 첫 줄 = 알림 종류.
+    (제목, 본문, 태그) 를 돌려줌"""
+    info, name = PRICE_INFO.get(code), NAMES.get(code)
+    if not info or not name:
+        return title, message, "chart_with_downwards_trend"
     px, chg = info
     arrow = "▲" if chg > 0 else "▼" if chg < 0 else "-"
-    return f"{px:,.0f}원 {arrow} {chg:+.2f}%\n{message}"
+    kind = " ".join(title.replace(name, " ").replace(":", " ").split())
+    tag = "red_circle" if chg > 0 else "large_blue_circle" if chg < 0 else "white_circle"
+    return f"{name} {px:,.0f} {arrow}{abs(chg):.2f}%", f"[{kind}] {message}", tag
 
 
-def send_ntfy(topic, title, message, code=None, high=False):
-    message = with_price(message, code)
+def send_ntfy(topic, title, message, code=None, high=False, _laid=False):
+    tag = "chart_with_downwards_trend"
+    if not _laid:
+        title, message, tag = layout(title, message, code)
     body = {
         "topic": topic,
         "title": title,
         "message": message,
-        "tags": ["chart_with_downwards_trend"],
+        "tags": [tag],
         "priority": 4 if high else 3,
     }
     if code:
@@ -234,8 +243,7 @@ def _h(text):
 
 def send_ntfy_image(topic, title, message, png, code, high=False):
     """차트 이미지를 첨부해서 알림. 실패하면 글자만 보냄."""
-    plain = message
-    message = with_price(message, code)
+    title, message, tag = layout(title, message, code)
     try:
         r = requests.put(
             f"https://ntfy.sh/{topic}",
@@ -244,7 +252,7 @@ def send_ntfy_image(topic, title, message, png, code, high=False):
                 "Title": _h(title),
                 "Message": _h(message),
                 "Filename": f"{code}.png",
-                "Tags": "chart_with_downwards_trend",
+                "Tags": tag,
                 "Priority": "4" if high else "3",
                 "Click": f"https://m.stock.naver.com/domestic/stock/{code}/total",
             },
@@ -253,7 +261,7 @@ def send_ntfy_image(topic, title, message, png, code, high=False):
         r.raise_for_status()
     except Exception as e:
         print(f"[이미지 알림 실패, 글자로 보냄] {e}")
-        send_ntfy(topic, title, plain, code=code, high=high)
+        send_ntfy(topic, title, message, code=code, high=high, _laid=True)
 
 
 def pc_alive(topic):
@@ -340,6 +348,7 @@ def main():
             last_date = candles[-1][0] if candles else ""
             chart[s["code"]] = {"name": s["name"], "day": candles[-CHART_DAYS:]}
             if len(candles) >= 2:
+                NAMES[s["code"]] = s["name"]
                 PRICE_INFO[s["code"]] = (candles[-1][4], (candles[-1][4] - candles[-2][4]) / candles[-2][4] * 100)
         except Exception as e:  # 한 종목 실패해도 나머지는 계속
             print(f"[실패] {s['name']}({s['code']}): {e}")
