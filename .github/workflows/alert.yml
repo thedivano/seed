@@ -51,16 +51,19 @@ jobs:
         run: python alert.py
 
       - name: 알림 기록 저장
+        continue-on-error: true
         run: |
           git config user.name "seed-bot"
           git config user.email "seed-bot@users.noreply.github.com"
           git add state/sent.json
           if ! git diff --cached --quiet; then
             git commit -m "알림 기록 업데이트"
-            git pull --rebase -q origin main && git push
+            # 다른 실행과 겹쳐도 이번 기록으로 맞추고, 실패해도 다음 단계는 계속
+            for i in 1 2 3; do git pull --rebase -X theirs -q origin main && git push -q && break; sleep 5; done || true
           fi
 
       - name: 차트 데이터를 chart-data 브랜치에 덮어쓰기 (시드 페이지용)
+        if: always()
         run: |
           [ -f data/chart.json ] || exit 0
           mkdir -p /tmp/chart && cp data/*.json /tmp/chart/ && cd /tmp/chart
