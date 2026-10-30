@@ -200,7 +200,20 @@ def rsi(values, n=14):
     return 100 - 100 / (1 + avg_g / avg_l)
 
 
+PRICE_INFO = {}  # code -> (현재가, 전일 대비 %) : 모든 알림 맨 위에 붙임
+
+
+def with_price(message, code):
+    info = PRICE_INFO.get(code)
+    if not info:
+        return message
+    px, chg = info
+    arrow = "▲" if chg > 0 else "▼" if chg < 0 else "-"
+    return f"{px:,.0f}원 {arrow} {chg:+.2f}%\n{message}"
+
+
 def send_ntfy(topic, title, message, code=None, high=False):
+    message = with_price(message, code)
     body = {
         "topic": topic,
         "title": title,
@@ -221,6 +234,8 @@ def _h(text):
 
 def send_ntfy_image(topic, title, message, png, code, high=False):
     """차트 이미지를 첨부해서 알림. 실패하면 글자만 보냄."""
+    plain = message
+    message = with_price(message, code)
     try:
         r = requests.put(
             f"https://ntfy.sh/{topic}",
@@ -238,7 +253,7 @@ def send_ntfy_image(topic, title, message, png, code, high=False):
         r.raise_for_status()
     except Exception as e:
         print(f"[이미지 알림 실패, 글자로 보냄] {e}")
-        send_ntfy(topic, title, message, code=code, high=high)
+        send_ntfy(topic, title, plain, code=code, high=high)
 
 
 def pc_alive(topic):
@@ -324,6 +339,8 @@ def main():
             closes = [c[4] for c in candles]
             last_date = candles[-1][0] if candles else ""
             chart[s["code"]] = {"name": s["name"], "day": candles[-CHART_DAYS:]}
+            if len(candles) >= 2:
+                PRICE_INFO[s["code"]] = (candles[-1][4], (candles[-1][4] - candles[-2][4]) / candles[-2][4] * 100)
         except Exception as e:  # 한 종목 실패해도 나머지는 계속
             print(f"[실패] {s['name']}({s['code']}): {e}")
             report.append(f"{s['name']}: 시세를 못 가져옴")

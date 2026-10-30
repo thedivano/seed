@@ -173,6 +173,8 @@ def evaluate(code, price, prev):
     if not w or not past or len(past) < alert.MA_DAYS:
         return
     closes = [x[4] for x in rows]
+    if len(rows) >= 2:
+        alert.PRICE_INFO[code] = (price, (price - rows[-2][4]) / rows[-2][4] * 100)
     w20 = closes[-alert.MA_DAYS:]
     ma20 = sum(w20) / alert.MA_DAYS
     sd = (sum((x - ma20) ** 2 for x in w20) / alert.MA_DAYS) ** 0.5
