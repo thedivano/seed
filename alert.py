@@ -30,6 +30,7 @@ NEAR_PCT = 2.0   # 20일선 ±2% 이내면 "근접"
 RSI_MAX = 30.0
 REPEAT_MIN = 60  # 조건이 이어지는 동안 이 간격(분)마다 다시 알림
 LEVEL_PCT = 2.0  # 볼린저 상단·하단, 20일선에 이 % 안으로 다가오면 알림 (같은 선은 1시간 지나 다시 오면 또 알림)
+STEP_PCT = 3.0   # 전일 종가 대비 이 % 단위(±3, ±6, ±9…)를 새로 넘을 때마다 알림
 # --------------------------
 
 ROOT = Path(__file__).parent
@@ -355,6 +356,29 @@ def main():
 
     # 주봉·분봉 (차트용 + 알림선 확인용)
     chart_extras(chart)
+
+    # ---------- 전일 대비 3% 단위 변동 ----------
+    for s in load_watchlist():
+        item = chart.get(s["code"])
+        if not item or quiet or len(item.get("day", [])) < 2 or item["day"][-1][0] != today_ymd:
+            continue
+        prev_close, px = item["day"][-2][4], item["day"][-1][4]
+        chg = (px - prev_close) / prev_close * 100
+        step = int(chg / STEP_PCT)  # +7.2% → 2, -3.5% → -1
+        key = f"step:{s['code']}"
+        done = last_sent.get(key, 0)
+        if step != 0 and abs(step) > abs(done) or (step != 0 and (step > 0) != (done > 0)):
+            last_sent[key] = step
+            title = f"{'급등' if step > 0 else '급락'} {step * STEP_PCT:+.0f}%: {s['name']}"
+            msg = f"전일 {prev_close:,.0f}원 → 지금 {px:,.0f}원 ({chg:+.2f}%)"
+            try:
+                from chart_image import daily_chart_png
+                png = daily_chart_png(s["code"], item["day"], f"{chg:+.1f}%", hlines=s["lines"])
+                send_ntfy_image(topic, title, msg, png, s["code"], high=True)
+            except Exception as e:
+                print(f"[차트 이미지 실패] {e}")
+                send_ntfy(topic, title, msg, code=s["code"], high=True)
+            print(f"[변동] {title}")
 
     # ---------- 볼린저 상단·하단, 20일선에 2% 안으로 다가왔는지 ----------
     for s in load_watchlist():

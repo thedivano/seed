@@ -200,6 +200,20 @@ def evaluate(code, price, prev):
         msg = " / ".join(f"{n} {lv:,.0f}원까지 {'위로' if g >= 0 else '아래로'} {abs(g):.1f}%" for n, lv, g, _ in near) + f" · 지금 {price:,.0f}원"
         send(f"근접: {name} " + "·".join(n for n, *_ in near), msg, code, rows, w["lines"], subtitle="near " + " / ".join(e for *_, e in near))
 
+    # 4) 전일 종가 대비 3% 단위 변동
+    if len(rows) >= 2:
+        pc = rows[-2][4]
+        chg = (price - pc) / pc * 100
+        step = int(chg / alert.STEP_PCT)
+        day = now().strftime("%Y-%m-%d")
+        sk = f"step:{code}"
+        done = state.setdefault(day, {}).get(sk, 0)
+        if step != 0 and (abs(step) > abs(done) or (step > 0) != (done > 0)):
+            state[day][sk] = step
+            save_state()
+            send(f"{'급등' if step > 0 else '급락'} {step * alert.STEP_PCT:+.0f}%: {name}",
+                 f"전일 {pc:,.0f}원 → 지금 {price:,.0f}원 ({chg:+.2f}%)", code, rows, w["lines"], high=True, subtitle=f"{chg:+.1f}%")
+
     # 3) 내가 그린 알림선: 이전 가격과 새 가격 사이에 선이 있으면 닿은 것
     if prev is not None:
         lo, hi = min(prev, price), max(prev, price)
