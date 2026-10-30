@@ -100,6 +100,9 @@ def _num(x):
         return None
 
 
+KRX = {}  # code -> [정규장 종가(장중엔 현재가), 정규장 등락률, 장 상태]
+
+
 def fetch_quote(code):
     """네이버 실시간 현재가. 프리·애프터마켓(넥스트레이드) 시간에는 그 가격을 돌려줌.
     {"price", "open", "high", "low", "session"} 또는 None"""
@@ -108,6 +111,10 @@ def fetch_quote(code):
         d = r.json()["datas"][0]
     except Exception:
         return None
+    try:
+        KRX[code] = [_num(d.get("closePrice")), _num(d.get("fluctuationsRatio")), d.get("marketStatus", "")]
+    except Exception:
+        pass
     over = d.get("overMarketPriceInfo") or {}
     if over.get("overMarketStatus") == "OPEN" and _num(over.get("overPrice")):
         src, session = over, over.get("tradingSessionType", "OVER")
@@ -347,6 +354,8 @@ def main():
             closes = [c[4] for c in candles]
             last_date = candles[-1][0] if candles else ""
             chart[s["code"]] = {"name": s["name"], "day": candles[-CHART_DAYS:]}
+            if s["code"] in KRX:
+                chart[s["code"]]["krx"] = KRX[s["code"]]
             if len(candles) >= 2:
                 NAMES[s["code"]] = s["name"]
                 PRICE_INFO[s["code"]] = (candles[-1][4], (candles[-1][4] - candles[-2][4]) / candles[-2][4] * 100)
