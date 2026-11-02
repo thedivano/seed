@@ -1,0 +1,16 @@
+name: probe
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r requirements.txt && python probe.py
+      - run: |
+          mkdir /tmp/p && cp probe.json /tmp/p/ && cd /tmp/p && git init -q -b probe-data && git add probe.json
+          git -c user.name=seed-bot -c user.email=b@x commit -qm probe
+          git push -fq "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" probe-data

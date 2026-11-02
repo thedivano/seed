@@ -17,6 +17,7 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import base64
@@ -43,6 +44,7 @@ CHART_M1 = 1500                        # 1분봉: 최근 2거래일 정도
 CHART_M10 = 600                        # 10분봉
 CHART_M30 = 300                        # 30분봉
 KST = timezone(timedelta(hours=9))
+NY = ZoneInfo("America/New_York")
 UA = {"User-Agent": "Mozilla/5.0 (seed-alert)"}
 
 
@@ -50,8 +52,12 @@ def load_watchlist():
     with open(WATCHLIST, encoding="utf-8-sig") as f:
         rows = []
         for r in csv.DictReader(f):
-            code = (r.get("종목코드") or "").strip().zfill(6)
+            market = (r.get("시장") or "KR").strip().upper() or "KR"
+            raw = (r.get("종목코드") or "").strip()
+            code = raw.upper() if market == "US" else raw.zfill(6)
             name = (r.get("종목명") or "").strip()
+            # 알림 칸이 없으면(예전 파일) 켜진 것으로, N/0/끔 이면 꺼진 것으로
+            alert_on = (r.get("알림") or "Y").strip().upper() not in ("N", "0", "OFF", "끔", "X")
             lines = []
             for x in (r.get("알림선") or "").replace(",", "/").split("/"):
                 try:
@@ -59,8 +65,9 @@ def load_watchlist():
                         lines.append(float(x.strip()))
                 except ValueError:
                     pass
-            if code.isdigit() and len(code) == 6:
-                rows.append({"code": code, "name": name or code, "lines": lines})
+            ok = (code.isdigit() and len(code) == 6) if market == "KR" else (code and all(ch.isalnum() or ch in ".-" for ch in code))
+            if ok:
+                rows.append({"code": code, "name": name or code, "lines": lines, "market": market, "alert": alert_on})
         return rows
 
 
@@ -158,6 +165,79 @@ def merge_live(candles, q, today_ymd):
         c[2], c[3], c[4] = max(c[2], q["price"]), min(c[3], q["price"]), q["price"]
         return candles[:-1] + [c]
     return candles + [[today_ymd, q["open"], max(q["high"], q["price"]), min(q["low"], q["price"]), q["price"], 0]]
+
+
+# ---------- 미국 주식 (야후 파이낸스) ----------
+YH = "https://query1.finance.yahoo.com/v8/finance/chart/"
+
+
+def _yh(ticker, rng, interval, prepost=False):
+    r = requests.get(YH + ticker, params={"range": rng, "interval": interval, "includePrePost": str(prepost).lower()},
+                     headers=UA, timeout=20)
+    r.raise_for_status()
+    res = r.json()["chart"]["result"][0]
+    q = res["indicators"]["quote"][0]
+    rows = []
+    for i, t in enumerate(res.get("timestamp") or []):
+        c = q["close"][i]
+        if c is None:
+            continue
+        o, h, l = q["open"][i] or c, q["high"][i] or c, q["low"][i] or c
+        stamp = datetime.fromtimestamp(t, NY)
+        key = stamp.strftime("%Y%m%d") if interval in ("1d", "1wk") else stamp.strftime("%Y%m%d%H%M")
+        rows.append([key, round(o, 4), round(h, 4), round(l, 4), round(c, 4), int(q["volume"][i] or 0)])
+    return res["meta"], rows
+
+
+def us_load(ticker):
+    """미국 종목 일봉 + 실시간 가격(프리·애프터 포함). KRX/INFO 와 같은 모양으로 채움."""
+    meta_d, day = _yh(ticker, "2y", "1d")
+    meta, m1 = _yh(ticker, "2d", "1m", prepost=True)
+    reg = meta.get("regularMarketPrice") or (day[-1][4] if day else None)
+    prev = meta.get("previousClose") or meta.get("chartPreviousClose")
+    live = m1[-1][4] if m1 else reg
+    period = (meta.get("currentTradingPeriod") or {}).get("regular") or {}
+    now_ts = time.time()
+    status = "OPEN" if period and period.get("start", 0) <= now_ts <= period.get("end", 0) else "CLOSE"
+    if day and live and status != "OPEN":
+        pass  # 장 밖: 일봉 종가는 정규장 종가 그대로 두고, 현재가는 시간외 가격
+    if day:
+        last = list(day[-1])
+        if status == "OPEN" and live:
+            last[2], last[3], last[4] = max(last[2], live), min(last[3], live), live
+        day[-1] = last
+    rc = (reg - prev) / prev * 100 if reg and prev else 0
+    ext = live if live and status != "OPEN" and abs(live - (reg or live)) > 1e-9 else 0
+    KRX[ticker] = [reg, round(rc, 2), status, prev, ext or 0, round((ext - prev) / prev * 100, 2) if ext and prev else 0]
+    INFO[ticker] = {"openPrice": f"{day[-1][1]:,.2f}" if day else "", "highPrice": f"{meta.get('regularMarketDayHigh', 0):,.2f}",
+                    "lowPrice": f"{meta.get('regularMarketDayLow', 0):,.2f}", "closePrice": f"{reg:,.2f}" if reg else "",
+                    "fiftyTwoWeekHigh": meta.get("fiftyTwoWeekHigh"), "fiftyTwoWeekLow": meta.get("fiftyTwoWeekLow"),
+                    "currency": meta.get("currency", "USD"), "name": meta.get("longName") or meta.get("shortName")}
+    return day, live, m1
+
+
+def us_extras(ticker, m1):
+    _, week = _yh(ticker, "5y", "1wk")
+    _, m5 = _yh(ticker, "10d", "5m", prepost=True)
+    _, m30 = _yh(ticker, "1mo", "30m", prepost=True)
+    m10 = []
+    for t, o, h, l, c, v in m5:
+        mins = int(t[8:10]) * 60 + int(t[10:12]); st = mins // 10 * 10
+        key = f"{t[:8]}{st // 60:02d}{st % 60:02d}"
+        if m10 and m10[-1][0] == key:
+            b = m10[-1]; b[2], b[3], b[4], b[5] = max(b[2], h), min(b[3], l), c, b[5] + v
+        else:
+            m10.append([key, o, h, l, c, v])
+    return week, m1, m10, m30
+
+
+def money(code, v):
+    """종목 통화에 맞춘 가격 글자"""
+    if v is None:
+        return "-"
+    if code and not code.isdigit():
+        return f"${v:,.2f}"
+    return f"{v:,.0f}원"
 
 
 def fetch_fchart(code, timeframe, count):
@@ -317,6 +397,11 @@ def chart_extras(chart):
     """일봉 외에 주봉·분봉을 붙임. 한 종목이 실패해도 일봉은 남김."""
     for code, item in chart.items():
         try:
+            if item.get("market") == "US":
+                week, m1, m10, m30 = us_extras(code, item.pop("_m1", []))
+                item["week"], item["m1"], item["m10"], item["m30"] = week[-CHART_WEEKS:], m1[-CHART_M1:], m10[-CHART_M10:], m30[-CHART_M30:]
+                time.sleep(0.3)
+                continue
             item["week"] = fetch_fchart(code, "week", CHART_WEEKS + 5)[-CHART_WEEKS:]
             m1, m10, m30 = minute_bars(code)
             item["m1"], item["m10"], item["m30"] = m1[-CHART_M1:], m10[-CHART_M10:], m30[-CHART_M30:]
@@ -343,20 +428,35 @@ def main():
 
     now = datetime.now(KST)
     today = now.strftime("%Y-%m-%d")
-    if not (test or chart_only):
-        hm = now.hour * 100 + now.minute
-        if now.weekday() >= 5 or not (800 <= hm <= 2000):
-            print(f"장 시간이 아니라 건너뜀 ({now:%m-%d %H:%M} KST)")
-            return
+    ny = datetime.now(NY)
+    kr_hours = now.weekday() < 5 and 800 <= now.hour * 100 + now.minute <= 2000
+    us_hours = ny.weekday() < 5 and 400 <= ny.hour * 100 + ny.minute <= 2000  # 미국 프리~애프터 (뉴욕 시간)
+    if not (test or chart_only) and not (kr_hours or us_hours):
+        print(f"장 시간이 아니라 건너뜀 ({now:%m-%d %H:%M} KST)")
+        return
 
     # 기록: {"날짜": {"종목코드": "마지막 알림 시각"}} — 오늘 것만 남김
     old = load_state().get(today, {})
     last_sent = old if isinstance(old, dict) else {}
     state = {today: last_sent}
     # PC 실시간 감시가 켜져 있으면 알림은 PC에 맡기고 여기서는 차트 데이터만 준비 (중복 알림 방지)
-    quiet = chart_only or (not test and pc_alive(topic))
-    if quiet and not chart_only:
-        print("[양보] PC 실시간 감시가 켜져 있어서 알림은 쉬어요")
+    pc_on = not test and not chart_only and pc_alive(topic)
+    if pc_on:
+        print("[양보] PC 실시간 감시가 켜져 있어서 한국 종목 알림은 쉬어요")
+    closed = set()  # 오늘 휴장으로 보이는 시장
+
+    def mute(s):
+        """이 종목은 지금 알림을 보내지 않음: 알림 꺼짐 / 장 시간 아님 / 휴장 / PC가 맡음"""
+        if chart_only or not s.get("alert", True) or s["market"] in closed:
+            return True
+        if test:
+            return False
+        if s["market"] == "US":
+            return not us_hours
+        return pc_on or not kr_hours
+
+    def tday(s):
+        return ny.strftime("%Y%m%d") if s["market"] == "US" else now.strftime("%Y%m%d")
 
     def due(code):
         t = last_sent.get(code)
@@ -368,13 +468,25 @@ def main():
     report, hits = [], []
     chart = {}
     today_ymd = now.strftime("%Y%m%d")
-    market_checked = False
+    checked = set()
     for s in load_watchlist():
         try:
-            candles = merge_live(fetch_candles(s["code"]), fetch_quote(s["code"]), today_ymd)
-            closes = [c[4] for c in candles]
+            if s["market"] == "US":
+                candles, live, m1 = us_load(s["code"])
+                if live and candles and KRX[s["code"]][2] != "OPEN" and candles[-1][0] == ny.strftime("%Y%m%d"):
+                    pass
+                closes = [c[4] for c in candles]
+                if live:
+                    closes = closes[:-1] + [live] if candles and candles[-1][0] == tday(s) else closes + [live]
+            else:
+                candles = merge_live(fetch_candles(s["code"]), fetch_quote(s["code"]), today_ymd)
+                closes = [c[4] for c in candles]
+                live, m1 = None, []
             last_date = candles[-1][0] if candles else ""
-            chart[s["code"]] = {"name": s["name"], "day": candles[-CHART_DAYS:]}
+            chart[s["code"]] = {"name": s["name"], "market": s["market"], "day": candles[-CHART_DAYS:]}
+            if s["market"] == "US":
+                chart[s["code"]]["_m1"] = m1
+                chart[s["code"]]["live"] = live
             if s["code"] in KRX:
                 chart[s["code"]]["krx"] = KRX[s["code"]]
             if s["code"] in INFO:
@@ -384,18 +496,19 @@ def main():
             if base:
                 chart[s["code"]]["base"] = base
                 NAMES[s["code"]] = s["name"]
-                PRICE_INFO[s["code"]] = (candles[-1][4], (candles[-1][4] - base) / base * 100)
+                cur = closes[-1] if closes else candles[-1][4]
+                PRICE_INFO[s["code"]] = (cur, (cur - base) / base * 100)
         except Exception as e:  # 한 종목 실패해도 나머지는 계속
             print(f"[실패] {s['name']}({s['code']}): {e}")
             report.append(f"{s['name']}: 시세를 못 가져옴")
             continue
-        # 공휴일 등 장이 안 열린 날: 9:30이 지나도 오늘 시세가 없으면 전체 건너뜀
-        if not market_checked and not (test or chart_only):
-            market_checked = True
-            if last_date != today_ymd and now.hour * 100 + now.minute >= 930:
-                print(f"오늘({today_ymd}) 시세가 없어 휴장일로 보고 건너뜀 (마지막 {last_date})")
-                save_state(state)
-                return
+        # 공휴일 등 장이 안 열린 날: 장 시작 30분이 지나도 오늘 시세가 없으면 그 시장은 알림 쉼
+        if s["market"] not in checked and not (test or chart_only):
+            checked.add(s["market"])
+            t_now = (ny if s["market"] == "US" else now)
+            if last_date != tday(s) and t_now.hour * 100 + t_now.minute >= (1000 if s["market"] == "US" else 930):
+                print(f"[{s['market']}] 오늘({tday(s)}) 시세가 없어 휴장일로 보고 알림을 쉬어요 (마지막 {last_date})")
+                closed.add(s["market"])
         if len(closes) < MA_DAYS + 1:
             report.append(f"{s['name']}: 데이터 부족")
             continue
@@ -407,11 +520,11 @@ def main():
         near = abs(gap) <= NEAR_PCT
         low = r is not None and r <= RSI_MAX
 
-        line = f"{s['name']} {price:,.0f}원 | 20일선 {gap:+.1f}% | RSI {r:.1f}"
+        line = f"{s['name']} {money(s['code'], price)} | 20일선 {gap:+.1f}% | RSI {r:.1f}"
         print(line, "← 조건 충족" if near and low else "")
         report.append(line)
 
-        if near and low and due(s["code"]) and not quiet:
+        if near and low and due(s["code"]) and not mute(s):
             hits.append((s, line, candles[-CHART_DAYS:], r))
         time.sleep(0.3)
 
@@ -421,9 +534,11 @@ def main():
     # ---------- 전일 대비 3% 단위 변동 ----------
     for s in load_watchlist():
         item = chart.get(s["code"])
-        if not item or quiet or len(item.get("day", [])) < 2 or item["day"][-1][0] != today_ymd:
+        if not item or mute(s) or len(item.get("day", [])) < 2:
             continue
-        prev_close, px = item.get("base") or item["day"][-2][4], item["day"][-1][4]
+        if item["day"][-1][0] != tday(s) and not item.get("live"):
+            continue
+        prev_close, px = item.get("base") or item["day"][-2][4], item.get("live") or item["day"][-1][4]
         chg = (px - prev_close) / prev_close * 100
         step = int(chg / STEP_PCT)  # +7.2% → 2, -3.5% → -1
         key = f"step:{s['code']}"
@@ -431,7 +546,7 @@ def main():
         if step != 0 and abs(step) > abs(done) or (step != 0 and (step > 0) != (done > 0)):
             last_sent[key] = step
             title = f"{'급등' if step > 0 else '급락'} {step * STEP_PCT:+.0f}%: {s['name']}"
-            msg = f"전일 {prev_close:,.0f}원 → 지금 {px:,.0f}원 ({chg:+.2f}%)"
+            msg = f"전일 {money(s['code'], prev_close)} → 지금 {money(s['code'], px)} ({chg:+.2f}%)"
             try:
                 from chart_image import daily_chart_png
                 png = daily_chart_png(s["code"], item["day"], f"{chg:+.1f}%", hlines=s["lines"])
@@ -444,10 +559,10 @@ def main():
     # ---------- 볼린저 상단·하단, 20일선에 2% 안으로 다가왔는지 ----------
     for s in load_watchlist():
         item = chart.get(s["code"])
-        if not item or quiet or len(item.get("day", [])) < MA_DAYS:
+        if not item or mute(s) or len(item.get("day", [])) < MA_DAYS:
             continue
         closes = [b[4] for b in item["day"]]
-        px = closes[-1]
+        px = item.get("live") or closes[-1]
         w = closes[-MA_DAYS:]
         mid = sum(w) / MA_DAYS
         sd = (sum((x - mid) ** 2 for x in w) / MA_DAYS) ** 0.5
@@ -462,7 +577,7 @@ def main():
         if not near:
             continue
         title = f"근접: {s['name']} " + "·".join(n for n, _, _ in near)
-        msg = " / ".join(f"{n} {lv:,.0f}원까지 {'위로' if g >= 0 else '아래로'} {abs(g):.1f}%" for n, lv, g in near) + f" · 지금 {px:,.0f}원"
+        msg = " / ".join(f"{n} {money(s['code'], lv)}까지 {'위로' if g >= 0 else '아래로'} {abs(g):.1f}%" for n, lv, g in near) + f" · 지금 {money(s['code'], px)}"
         try:
             from chart_image import daily_chart_png
             en = {"밴드 상단": "BB upper", "20일선": "MA20", "밴드 하단": "BB lower"}
@@ -474,15 +589,15 @@ def main():
         print(f"[근접] {title}")
 
     # ---------- 내가 그린 알림선에 닿았는지 확인 ----------
-    since = last_sent.get("_checked", "")
     for s in load_watchlist():
+        since = last_sent.get(f"_checked:{s['market']}", "")
         item = chart.get(s["code"])
-        if not s["lines"] or not item or quiet:
+        if not s["lines"] or not item or mute(s):
             continue
-        m1 = [b for b in item.get("m1", []) if b[0][:8] == today_ymd]
+        m1 = [b for b in item.get("m1", []) if b[0][:8] == tday(s)]
         prev = [b for b in m1 if b[0] <= since]
         new = [b for b in m1 if b[0] > since]
-        live = item["day"][-1][4] if item.get("day") and item["day"][-1][0] == today_ymd else None
+        live = item.get("live") or (item["day"][-1][4] if item.get("day") and item["day"][-1][0] == tday(s) else None)
         last_px = last_sent.get(f"_px:{s['code']}")
         if new:
             start = prev[-1][4] if prev else (last_px or new[0][4])
@@ -501,8 +616,8 @@ def main():
             from_below = start < L
             how = "아래에서 올라와" if from_below else "위에서 내려와"
             kind = "저항선" if from_below else "지지선"
-            title = f"알림선 도달: {s['name']} {L:,.0f}원"
-            msg = f"{how} {kind} {L:,.0f}원에 닿았어요 · 지금 {now_px:,.0f}원"
+            title = f"알림선 도달: {s['name']} {money(s['code'], L)}"
+            msg = f"{how} {kind} {money(s['code'], L)}에 닿았어요 · 지금 {money(s['code'], now_px)}"
             try:
                 from chart_image import daily_chart_png
                 png = daily_chart_png(s["code"], item["day"], f"line {L:,.0f}", hlines=s["lines"])
@@ -514,7 +629,10 @@ def main():
             print(f"[알림선] {title}")
         last_sent[f"_px:{s['code']}"] = now_px
     if not chart_only:
-        last_sent["_checked"] = max([b[0] for it in chart.values() for b in it.get("m1", [])] or [since])
+        for mk in ("KR", "US"):
+            ts = [b[0] for it in chart.values() if it.get("market") == mk for b in it.get("m1", [])]
+            if ts:
+                last_sent[f"_checked:{mk}"] = max(ts)
 
     for s, line, rows, r in hits:
         again = s["code"] in last_sent

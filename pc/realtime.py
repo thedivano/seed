@@ -92,7 +92,7 @@ def refresh_watchlist():
             alert.WATCHLIST.write_text(r.text, encoding="utf-8")
         except Exception as e:
             log.warning("GitHub 에서 관심종목을 못 받아서 갖고 있는 파일을 써요: %s", e)
-    new = alert.load_watchlist()
+    new = [w for w in alert.load_watchlist() if w.get("market", "KR") == "KR"]  # PC는 한국 종목만
     with lock:
         changed = {w["code"] for w in new} != {w["code"] for w in watch}
         watch = new
@@ -170,7 +170,7 @@ def evaluate(code, price, prev):
             tb = today_bar[code] = [now().strftime("%Y%m%d"), price, price, price, price, 0]
         tb[2], tb[3], tb[4] = max(tb[2], price), min(tb[3], price), price
         rows = (past or []) + [list(tb)]
-    if not w or not past or len(past) < alert.MA_DAYS:
+    if not w or not past or len(past) < alert.MA_DAYS or not w.get("alert", True):
         return
     closes = [x[4] for x in rows]
     if len(rows) >= 2:
