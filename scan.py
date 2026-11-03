@@ -1,6 +1,6 @@
 """종목 발굴: 코스피·코스닥 전체에서
   1) 종가가 볼린저밴드 하단과 20일선 사이에 있고
-  2) 거래량이 직전 20일 평균의 200% 이상으로 튄
+  2) 거래량이 직전 20일 평균의 500% 이상으로 튄
 종목을 찾아 state/found.json 에 날짜와 함께 쌓아요. 시드 페이지의 '발굴' 목록에 나와요.
 """
 import json
@@ -15,7 +15,7 @@ import requests
 
 from alert import KST, UA, fetch_candles
 
-VOL_X = 2.0          # 거래량이 직전 20일 평균의 이 배수 이상
+VOL_X = 5.0          # 거래량이 직전 20일 평균의 이 배수 이상
 MIN_VALUE = 10e8     # 그날 거래대금이 이 금액(원) 이상인 종목만 (너무 작은 종목 거르기)
 LOOKBACK = 5         # 최근 며칠치 신호를 확인할지 (빠진 날 메우기)
 KEEP_DAYS = 30       # 이 기간이 지난 발굴 기록은 지움
@@ -103,7 +103,7 @@ def main():
     for h in found:
         old[h["id"]] = h  # 최근 5일 신호는 새 값(거래량·시가총액 등)으로 덮어씀
     cut = (datetime.now(KST) - timedelta(days=KEEP_DAYS)).strftime("%Y%m%d")
-    items = sorted((x for x in old.values() if x["date"] >= cut), key=lambda x: (x["date"], x["volx"]), reverse=True)
+    items = sorted((x for x in old.values() if x["date"] >= cut and x.get("volx", 0) >= VOL_X), key=lambda x: (x["date"], x["volx"]), reverse=True)
 
     FOUND.parent.mkdir(exist_ok=True)
     FOUND.write_text(json.dumps({"updatedAt": datetime.now(KST).isoformat(timespec="minutes"), "items": items},
