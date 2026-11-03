@@ -16,7 +16,7 @@ import requests
 from alert import KST, UA, fetch_candles
 
 VOL_X = 5.0          # 거래량이 직전 20일 평균의 이 배수 이상
-MIN_AVG_VOL = 500_000  # 직전 20일 평균 거래량이 이 주식 수 이상
+MIN_AVG_VOL = 50_000  # 직전 20일 평균 거래량이 이 주식 수 이상
 MIN_VALUE = 10e8     # 그날 거래대금이 이 금액(원) 이상인 종목만 (너무 작은 종목 거르기)
 LOOKBACK = 5         # 최근 며칠치 신호를 확인할지 (빠진 날 메우기)
 KEEP_DAYS = 30       # 이 기간이 지난 발굴 기록은 지움
