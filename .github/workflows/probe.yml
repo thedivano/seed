@@ -5,12 +5,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          curl -s -A "Mozilla/5.0" "https://finance.naver.com/item/main.naver?code=376900" | iconv -f cp949 -t utf-8 -c | grep -o 'type=upjong[^<]*<\|type=theme[^<]*<' | head -5
-          echo ===
-          curl -s -A "Mozilla/5.0" "https://finance.naver.com/sise/theme.naver?page=1" | iconv -f cp949 -t utf-8 -c | grep -o 'type=theme&no=[0-9]*">[^<]*<' | head -3
-          curl -s -A "Mozilla/5.0" "https://finance.naver.com/sise/theme.naver?page=1" | iconv -f cp949 -t utf-8 -c | grep -o 'page=[0-9]*' | sort -u | tail -3
-          echo ===
-          curl -s -A "Mozilla/5.0" "https://finance.naver.com/sise/sise_group_detail.naver?type=theme&no=1" | iconv -f cp949 -t utf-8 -c | grep -o 'code=[0-9]\{6\}">[^<]*<' | head -3
-          echo ===
-          curl -s -A "Mozilla/5.0" "https://m.stock.naver.com/api/stocks/theme?page=1&pageSize=3" | head -c 600; echo
-          curl -s -A "Mozilla/5.0" "https://m.stock.naver.com/api/stocks/upjong?page=1&pageSize=3" | head -c 400; echo
+          curl -s -A "Mozilla/5.0" "https://m.stock.naver.com/api/stocks/theme/166?page=1&pageSize=2" | head -c 500; echo
+          curl -s -A "Mozilla/5.0" "https://m.stock.naver.com/api/stocks/industry?page=1&pageSize=2" | head -c 400; echo
+          curl -s -A "Mozilla/5.0" "https://m.stock.naver.com/api/stocks/industry/281?page=1&pageSize=2" | head -c 400; echo
