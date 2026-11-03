@@ -56,7 +56,7 @@ def market_list(mkt):
 
 def check(code, name, mkt, shares=0):
     try:
-        c = fetch_candles(code, days=110)
+        c = fetch_candles(code, days=200)
     except Exception:
         return [], None
     hits = []
@@ -80,7 +80,9 @@ def check(code, name, mkt, shares=0):
             "mcap": round(close * shares / 1e8),
             "ma20": int(round(ma20)), "lower": int(round(lower)),
         })
-    return hits, ((c[-1][0], c[-1][4]) if c else None)
+    # 미니 차트용 일봉 (최근 130일: 60봉 + 이동평균 60일 계산분) "날짜,시가,고가,저가,종가;..."
+    day = ";".join(f"{r[0]},{int(r[1])},{int(r[2])},{int(r[3])},{int(r[4])}" for r in c[-130:]) if c else ""
+    return hits, ((c[-1][0], c[-1][4], day) if c else None)
 
 
 def reasons(code, date, prev):
@@ -151,7 +153,7 @@ def main():
             x["news"] = reasons(x["code"], x["date"], x["prev"])
     for x in old.values():  # 발굴 뒤 지금 얼마인지 보려고 오늘 종가를 붙임
         if x["code"] in last:
-            x["nowDate"], now = last[x["code"]]
+            x["nowDate"], now, x["day"] = last[x["code"]]
             x["now"] = int(now)
     cut = (datetime.now(KST) - timedelta(days=KEEP_DAYS)).strftime("%Y%m%d")
     items = sorted((x for x in old.values() if x["date"] >= cut and x.get("volx", 0) >= VOL_X and x.get("mcap", 0) >= MIN_MCAP and x.get("vol", 0) / max(x.get("volx", 1), 1e-9) >= MIN_AVG_VOL), key=lambda x: (x["date"], x["volx"]), reverse=True)
