@@ -16,7 +16,7 @@ import requests
 from alert import KST, UA, fetch_candles
 
 VOL_X = 5.0          # 거래량이 직전 20일 평균의 이 배수 이상
-MIN_VOL = 500_000    # 그날 거래량이 이 주식 수 이상
+MIN_AVG_VOL = 500_000  # 직전 20일 평균 거래량이 이 주식 수 이상
 MIN_VALUE = 10e8     # 그날 거래대금이 이 금액(원) 이상인 종목만 (너무 작은 종목 거르기)
 LOOKBACK = 5         # 최근 며칠치 신호를 확인할지 (빠진 날 메우기)
 KEEP_DAYS = 30       # 이 기간이 지난 발굴 기록은 지움
@@ -69,7 +69,7 @@ def check(code, name, mkt, shares=0):
         ma20 = sum(closes) / 20
         lower = ma20 - 2 * statistics.pstdev(closes)
         avg = sum(vols) / 20
-        if not (lower <= close <= ma20) or avg <= 0 or vol < VOL_X * avg or vol < MIN_VOL or close * vol < MIN_VALUE:
+        if not (lower <= close <= ma20) or avg < MIN_AVG_VOL or vol < VOL_X * avg or close * vol < MIN_VALUE:
             continue
         prev = c[i - 1][4]
         hits.append({
@@ -104,7 +104,7 @@ def main():
     for h in found:
         old[h["id"]] = h  # 최근 5일 신호는 새 값(거래량·시가총액 등)으로 덮어씀
     cut = (datetime.now(KST) - timedelta(days=KEEP_DAYS)).strftime("%Y%m%d")
-    items = sorted((x for x in old.values() if x["date"] >= cut and x.get("volx", 0) >= VOL_X and x.get("vol", 0) >= MIN_VOL), key=lambda x: (x["date"], x["volx"]), reverse=True)
+    items = sorted((x for x in old.values() if x["date"] >= cut and x.get("volx", 0) >= VOL_X and x.get("vol", 0) / max(x.get("volx", 1), 1e-9) >= MIN_AVG_VOL), key=lambda x: (x["date"], x["volx"]), reverse=True)
 
     FOUND.parent.mkdir(exist_ok=True)
     FOUND.write_text(json.dumps({"updatedAt": datetime.now(KST).isoformat(timespec="minutes"), "items": items},
