@@ -1,0 +1,9 @@
+name: probe
+on: workflow_dispatch
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -s -A "Mozilla/5.0" "https://m.stock.naver.com/api/news/stock/298690?pageSize=5&page=1" | head -c 1800; echo; echo ====
+          curl -s -A "Mozilla/5.0" "https://m.stock.naver.com/api/stock/298690/disclosure?pageSize=3&page=1" | head -c 1200; echo
