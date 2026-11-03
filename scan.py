@@ -123,6 +123,43 @@ def reasons(code, date, prev):
     return (out + news)[:4]
 
 
+def group_map(kind):
+    """kind = "industry"(업종) 또는 "theme"(테마). 종목코드 -> [(이름, 그룹 종목 수)]"""
+    groups, page = [], 1
+    while page < 20:
+        try:
+            d = requests.get(f"https://m.stock.naver.com/api/stocks/{kind}", params={"page": page, "pageSize": 100},
+                             headers=UA, timeout=15).json()
+        except Exception:
+            break
+        groups += d.get("groups") or []
+        if not d.get("groups") or page * 100 >= int(d.get("totalCount") or 0):
+            break
+        page += 1
+
+    def members(g):
+        codes, pg = [], 1
+        while pg < 10:
+            try:
+                d = requests.get(f"https://m.stock.naver.com/api/stocks/{kind}/{g['no']}",
+                                 params={"page": pg, "pageSize": 100}, headers=UA, timeout=15).json()
+            except Exception:
+                break
+            st = d.get("stocks") or []
+            codes += [x.get("itemCode") for x in st]
+            if len(st) < 100:
+                break
+            pg += 1
+        return g, codes
+
+    out = {}
+    with ThreadPoolExecutor(8) as ex:
+        for g, codes in ex.map(members, groups):
+            for c in codes:
+                out.setdefault(c, []).append((g.get("name", ""), int(g.get("totalCount") or 999)))
+    return out
+
+
 def main():
     universe = []
     for mkt in ("KOSPI", "KOSDAQ"):
@@ -151,6 +188,15 @@ def main():
     for x in old.values():  # 거래량이 터진 이유 (한 번 찾으면 그대로 둠)
         if "news" not in x and x.get("prev"):
             x["news"] = reasons(x["code"], x["date"], x["prev"])
+    try:  # 어떤 관련주인지: 업종 1개 + 테마 최대 3개 (종목 수가 적은 테마일수록 구체적이라 앞에)
+        ind, thm = group_map("industry"), group_map("theme")
+        for x in old.values():
+            if x["code"] in ind:
+                x["sector"] = ind[x["code"]][0][0]
+            if x["code"] in thm:
+                x["themes"] = [n for n, _ in sorted(thm[x["code"]], key=lambda t: t[1])[:3]]
+    except Exception as e:
+        print("업종·테마 실패:", e)
     for x in old.values():  # 발굴 뒤 지금 얼마인지 보려고 오늘 종가를 붙임
         if x["code"] in last:
             x["nowDate"], now, x["day"] = last[x["code"]]
