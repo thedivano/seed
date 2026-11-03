@@ -23,7 +23,7 @@ FOUND = Path(__file__).parent / "state" / "found.json"
 
 
 def market_list(mkt):
-    """네이버 모바일 시가총액 순 목록에서 일반 주식만 [(코드, 이름)]."""
+    """네이버 모바일 시가총액 순 목록에서 일반 주식만 [(코드, 이름, 상장주식수)]."""
     out, page = [], 1
     while page < 40:
         r = requests.get(f"https://m.stock.naver.com/api/stocks/marketValue/{mkt}",
@@ -40,7 +40,11 @@ def market_list(mkt):
                 continue
             if "스팩" in name or "ETN" in name:
                 continue
-            out.append((code, name))
+            try:  # 상장주식수 = 시가총액 / 종가 (그날 종가로 시가총액을 다시 계산하려고)
+                shares = float(s.get("marketValueRaw") or 0) / float(s.get("closePriceRaw") or 0)
+            except (TypeError, ValueError, ZeroDivisionError):
+                shares = 0
+            out.append((code, name, shares))
         total = int(d.get("totalCount") or 0)
         if total and page * 100 >= total:
             break
@@ -48,7 +52,7 @@ def market_list(mkt):
     return out
 
 
-def check(code, name, mkt):
+def check(code, name, mkt, shares=0):
     try:
         c = fetch_candles(code, days=110)
     except Exception:
@@ -70,7 +74,8 @@ def check(code, name, mkt):
         hits.append({
             "id": f"{code}_{date}", "code": code, "name": name, "market": mkt, "date": date,
             "close": int(close), "chg": round((close - prev) / prev * 100, 2) if prev else 0,
-            "volx": round(vol / avg, 2), "value": round(close * vol / 1e8),
+            "volx": round(vol / avg, 2), "value": round(close * vol / 1e8), "vol": int(vol),
+            "mcap": round(close * shares / 1e8),
             "ma20": int(round(ma20)), "lower": int(round(lower)),
         })
     return hits
@@ -81,7 +86,7 @@ def main():
     for mkt in ("KOSPI", "KOSDAQ"):
         lst = market_list(mkt)
         print(f"{mkt}: {len(lst)}종목")
-        universe += [(c, n, mkt) for c, n in lst]
+        universe += [(c, n, mkt, sh) for c, n, sh in lst]
     if not universe:
         print("종목 목록을 못 받았어요")
         sys.exit(1)
@@ -96,7 +101,7 @@ def main():
         except Exception:
             old = {}
     for h in found:
-        old.setdefault(h["id"], h)
+        old[h["id"]] = h  # 최근 5일 신호는 새 값(거래량·시가총액 등)으로 덮어씀
     cut = (datetime.now(KST) - timedelta(days=KEEP_DAYS)).strftime("%Y%m%d")
     items = sorted((x for x in old.values() if x["date"] >= cut), key=lambda x: (x["date"], x["volx"]), reverse=True)
 
