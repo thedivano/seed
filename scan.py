@@ -160,6 +160,33 @@ def group_map(kind):
     return out
 
 
+def extra_info(x):
+    """그날 외국인·기관·개인 순매수(주), 지금 PER·PBR."""
+    def n(v):
+        try:
+            return int(str(v).replace(",", "").replace("+", ""))
+        except (TypeError, ValueError):
+            return None
+    if "frg" not in x:
+        try:
+            rows = requests.get(f"https://m.stock.naver.com/api/stock/{x['code']}/trend", params={"pageSize": 40},
+                                headers=UA, timeout=10).json()
+            for r in rows or []:
+                if r.get("bizdate") == x["date"]:
+                    x["frg"], x["org"], x["ind"] = (n(r.get("foreignerPureBuyQuant")), n(r.get("organPureBuyQuant")),
+                                                    n(r.get("individualPureBuyQuant")))
+                    break
+        except Exception:
+            pass
+    try:
+        d = requests.get(f"https://m.stock.naver.com/api/stock/{x['code']}/integration", headers=UA, timeout=10).json()
+        for t in d.get("totalInfos") or []:
+            if t.get("code") in ("per", "pbr"):
+                x[t["code"]] = str(t.get("value") or "")
+    except Exception:
+        pass
+
+
 def main():
     universe = []
     for mkt in ("KOSPI", "KOSDAQ"):
@@ -197,6 +224,8 @@ def main():
                 x["themes"] = [n for n, _ in sorted(thm[x["code"]], key=lambda t: t[1])[:3]]
     except Exception as e:
         print("업종·테마 실패:", e)
+    with ThreadPoolExecutor(8) as ex:  # 수급·PER·PBR
+        list(ex.map(extra_info, old.values()))
     for x in old.values():  # 발굴 뒤 지금 얼마인지 보려고 오늘 종가를 붙임
         if x["code"] in last:
             x["nowDate"], now, x["day"] = last[x["code"]]
