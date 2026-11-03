@@ -74,13 +74,51 @@ def check(code, name, mkt, shares=0):
             continue
         prev = c[i - 1][4]
         hits.append({
-            "id": f"{code}_{date}", "code": code, "name": name, "market": mkt, "date": date,
+            "id": f"{code}_{date}", "prev": c[i - 1][0], "code": code, "name": name, "market": mkt, "date": date,
             "close": int(close), "chg": round((close - prev) / prev * 100, 2) if prev else 0,
             "volx": round(vol / avg, 2), "value": round(close * vol / 1e8), "vol": int(vol),
             "mcap": round(close * shares / 1e8),
             "ma20": int(round(ma20)), "lower": int(round(lower)),
         })
     return hits, ((c[-1][0], c[-1][4]) if c else None)
+
+
+def reasons(code, date, prev):
+    """거래량이 터진 이유를 짐작할 수 있게: 전날 장 마감(15:30) 뒤 ~ 그날 사이의 공시·뉴스 제목 최대 4개."""
+    start, end = prev + "1530", date + "2359"
+    out = []
+    try:  # 공시
+        r = requests.get(f"https://m.stock.naver.com/api/stock/{code}/disclosure", params={"pageSize": 20, "page": 1},
+                         headers=UA, timeout=10)
+        for d in r.json() or []:
+            t = str(d.get("datetime", "")).replace("-", "").replace("T", "").replace(":", "")[:12]
+            if start <= t <= end:
+                out.append({"k": "공시", "t": d.get("title", ""), "d": t,
+                            "u": f"https://m.stock.naver.com/domestic/stock/{code}/disclosure"})
+    except Exception:
+        pass
+    news = []
+    try:  # 뉴스 (최신순으로 오니 기간보다 오래되면 멈춤)
+        for page in range(1, 8):
+            r = requests.get(f"https://m.stock.naver.com/api/news/stock/{code}", params={"pageSize": 20, "page": page},
+                             headers=UA, timeout=10)
+            groups = r.json() or []
+            if not groups:
+                break
+            oldest = "9"
+            for g in groups:
+                for n in g.get("items", [])[:1]:  # 같은 내용 기사 묶음은 대표 1개만
+                    t = str(n.get("datetime", ""))
+                    oldest = min(oldest, t)
+                    if start <= t <= end:
+                        news.append({"k": n.get("officeName", "뉴스"), "t": n.get("titleFull") or n.get("title", ""),
+                                     "d": t, "u": n.get("mobileNewsUrl", "")})
+            if oldest < start:
+                break
+    except Exception:
+        pass
+    news.sort(key=lambda x: x["d"], reverse=True)
+    return (out + news)[:4]
 
 
 def main():
@@ -105,7 +143,12 @@ def main():
         except Exception:
             old = {}
     for h in found:
+        if old.get(h["id"], {}).get("news"):  # 이미 찾은 이유는 유지 (비어 있으면 다시 찾음)
+            h["news"] = old[h["id"]]["news"]
         old[h["id"]] = h  # 최근 5일 신호는 새 값(거래량·시가총액 등)으로 덮어씀
+    for x in old.values():  # 거래량이 터진 이유 (한 번 찾으면 그대로 둠)
+        if "news" not in x and x.get("prev"):
+            x["news"] = reasons(x["code"], x["date"], x["prev"])
     for x in old.values():  # 발굴 뒤 지금 얼마인지 보려고 오늘 종가를 붙임
         if x["code"] in last:
             x["nowDate"], now = last[x["code"]]
