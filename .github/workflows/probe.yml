@@ -1,0 +1,20 @@
+name: probe
+on: workflow_dispatch
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          for u in "https://m.stock.naver.com/api/stock/376900/integration" "https://m.stock.naver.com/api/stock/376900/basic"; do
+            echo "=== $u"; curl -s -A "Mozilla/5.0" "$u" | python3 -c "
+          import json,sys;d=json.load(sys.stdin)
+          def walk(x,p=''):
+            if isinstance(x,dict):
+              for k,v in x.items(): walk(v,p+'.'+k)
+            elif isinstance(x,list):
+              for i,v in enumerate(x[:3]): walk(v,p+f'[{i}]')
+            else:
+              if any(s in p.lower() for s in ['theme','industry','upjong','group','sector']): print(p,str(x)[:80])
+          walk(d)"
+          done
+          echo "=== html"; curl -s -A "Mozilla/5.0" "https://finance.naver.com/item/main.naver?code=376900" | iconv -f euc-kr -t utf-8 | grep -o 'sise_group_detail[^"]*"[^<]*<' | head; 
