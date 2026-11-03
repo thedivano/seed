@@ -1,0 +1,11 @@
+name: probe
+on: workflow_dispatch
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -s -A "Mozilla/5.0" "https://m.stock.naver.com/api/stock/376900/trend?pageSize=2" | head -c 900; echo
+          curl -s -A "Mozilla/5.0" "https://m.stock.naver.com/api/stock/376900/integration" | python3 -c "
+          import json,sys;d=json.load(sys.stdin)
+          for t in d.get('totalInfos',[]): print(t.get('code'),t.get('key'),t.get('value'))"
