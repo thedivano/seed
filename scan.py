@@ -58,7 +58,7 @@ def check(code, name, mkt, shares=0):
     try:
         c = fetch_candles(code, days=110)
     except Exception:
-        return []
+        return [], None
     hits = []
     for back in range(LOOKBACK):
         i = len(c) - 1 - back
@@ -80,7 +80,7 @@ def check(code, name, mkt, shares=0):
             "mcap": round(close * shares / 1e8),
             "ma20": int(round(ma20)), "lower": int(round(lower)),
         })
-    return hits
+    return hits, ((c[-1][0], c[-1][4]) if c else None)
 
 
 def main():
@@ -94,7 +94,9 @@ def main():
         sys.exit(1)
 
     with ThreadPoolExecutor(8) as ex:
-        found = [h for hs in ex.map(lambda a: check(*a), universe) for h in hs]
+        res = list(ex.map(lambda a: check(*a), universe))
+    found = [h for hs, _ in res for h in hs]
+    last = {a[0]: lp for a, (_, lp) in zip(universe, res) if lp}  # 종목별 가장 최근 종가
 
     old = {}
     if FOUND.exists():
@@ -104,6 +106,10 @@ def main():
             old = {}
     for h in found:
         old[h["id"]] = h  # 최근 5일 신호는 새 값(거래량·시가총액 등)으로 덮어씀
+    for x in old.values():  # 발굴 뒤 지금 얼마인지 보려고 오늘 종가를 붙임
+        if x["code"] in last:
+            x["nowDate"], now = last[x["code"]]
+            x["now"] = int(now)
     cut = (datetime.now(KST) - timedelta(days=KEEP_DAYS)).strftime("%Y%m%d")
     items = sorted((x for x in old.values() if x["date"] >= cut and x.get("volx", 0) >= VOL_X and x.get("mcap", 0) >= MIN_MCAP and x.get("vol", 0) / max(x.get("volx", 1), 1e-9) >= MIN_AVG_VOL), key=lambda x: (x["date"], x["volx"]), reverse=True)
 
