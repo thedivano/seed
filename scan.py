@@ -81,7 +81,7 @@ def check(code, name, mkt, shares=0):
             "ma20": int(round(ma20)), "lower": int(round(lower)),
         })
     # 미니 차트용 일봉 (최근 130일: 60봉 + 이동평균 60일 계산분) "날짜,시가,고가,저가,종가;..."
-    day = ";".join(f"{r[0]},{int(r[1])},{int(r[2])},{int(r[3])},{int(r[4])}" for r in c[-130:]) if c else ""
+    day = ";".join(f"{r[0]},{int(r[1])},{int(r[2])},{int(r[3])},{int(r[4])},{int(r[5])}" for r in c[-130:]) if c else ""
     return hits, ((c[-1][0], c[-1][4], day) if c else None)
 
 
