@@ -2,6 +2,7 @@
   1) 종가가 볼린저밴드 하단과 20일선 사이에 있고
   2) 거래량이 직전 20일 평균의 500% 이상으로 튄
 종목을 찾아 state/found.json 에 날짜와 함께 쌓아요. 시드 페이지의 '발굴' 목록에 나와요.
+상한가(전일 대비 +29.5% 이상 마감) 종목도 kind="up" 으로 같이 쌓아요. 시드의 '상한가' 목록에 나와요.
 """
 import json
 import re
@@ -21,6 +22,8 @@ MIN_MCAP = 1000       # 시가총액(억 원)이 이 이상인 종목만
 MIN_VALUE = 10e8     # 그날 거래대금이 이 금액(원) 이상인 종목만 (너무 작은 종목 거르기)
 LOOKBACK = 5         # 최근 며칠치 신호를 확인할지 (빠진 날 메우기)
 KEEP_DAYS = 30       # 이 기간이 지난 발굴 기록은 지움
+LIMIT_FROM = "20261101"  # 상한가 종목은 이 날부터 모음
+LIMIT_PCT = 29.5     # 전일 종가 대비 이 % 이상으로 마감하면 상한가로 봄 (가격제한폭 30%, 호가 단위 내림 감안)
 FOUND = Path(__file__).parent / "state" / "found.json"
 
 
@@ -79,6 +82,24 @@ def check(code, name, mkt, shares=0):
             "volx": round(vol / avg, 2), "value": round(close * vol / 1e8), "vol": int(vol),
             "mcap": round(close * shares / 1e8),
             "ma20": int(round(ma20)), "lower": int(round(lower)),
+        })
+    # 상한가: LIMIT_FROM 이후(보관 기간 안)의 모든 날
+    cut = max(LIMIT_FROM, (datetime.now(KST) - timedelta(days=KEEP_DAYS)).strftime("%Y%m%d"))
+    for i in range(max(21, 1), len(c)):
+        date, o, h, l, close, vol = c[i]
+        prev = c[i - 1][4]
+        if date < cut or not prev or (close - prev) / prev * 100 < LIMIT_PCT:
+            continue
+        closes = [r[4] for r in c[max(0, i - 19):i + 1]]
+        vols = [r[5] for r in c[max(0, i - 20):i]]
+        ma20 = sum(closes) / len(closes)
+        lower = ma20 - 2 * statistics.pstdev(closes)
+        avg = sum(vols) / len(vols) if vols else 0
+        hits.append({
+            "id": f"up_{code}_{date}", "kind": "up", "prev": c[i - 1][0], "code": code, "name": name, "market": mkt,
+            "date": date, "close": int(close), "chg": round((close - prev) / prev * 100, 2),
+            "volx": round(vol / avg, 2) if avg else 0, "value": round(close * vol / 1e8), "vol": int(vol),
+            "mcap": round(close * shares / 1e8), "ma20": int(round(ma20)), "lower": int(round(lower)),
         })
     # 미니 차트용 일봉 (최근 130일: 60봉 + 이동평균 60일 계산분) "날짜,시가,고가,저가,종가;..."
     day = ";".join(f"{r[0]},{int(r[1])},{int(r[2])},{int(r[3])},{int(r[4])},{int(r[5])}" for r in c[-130:]) if c else ""
@@ -231,12 +252,12 @@ def main():
             x["nowDate"], now, x["day"] = last[x["code"]]
             x["now"] = int(now)
     cut = (datetime.now(KST) - timedelta(days=KEEP_DAYS)).strftime("%Y%m%d")
-    items = sorted((x for x in old.values() if x["date"] >= cut and x.get("volx", 0) >= VOL_X and x.get("mcap", 0) >= MIN_MCAP and x.get("vol", 0) / max(x.get("volx", 1), 1e-9) >= MIN_AVG_VOL), key=lambda x: (x["date"], x["volx"]), reverse=True)
+    items = sorted((x for x in old.values() if x["date"] >= cut and (x.get("kind") == "up" or x.get("volx", 0) >= VOL_X and x.get("mcap", 0) >= MIN_MCAP and x.get("vol", 0) / max(x.get("volx", 1), 1e-9) >= MIN_AVG_VOL)), key=lambda x: (x["date"], x["volx"]), reverse=True)
 
     FOUND.parent.mkdir(exist_ok=True)
     FOUND.write_text(json.dumps({"updatedAt": datetime.now(KST).isoformat(timespec="minutes"), "items": items},
                                 ensure_ascii=False, indent=0), encoding="utf-8")
-    print(f"이번에 찾은 신호 {len(found)}개 · 목록 {len(items)}개")
+    print(f"이번에 찾은 신호 {len(found)}개 (상한가 {sum(h.get('kind') == 'up' for h in found)}) · 목록 {len(items)}개")
     for h in found[:30]:
         print(h["date"], h["name"], f"거래량 {h['volx']}배", h["close"])
 
