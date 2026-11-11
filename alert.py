@@ -312,6 +312,19 @@ PRICE_INFO = {}  # code -> (현재가, 전일 대비 %) : 모든 알림 맨 위�
 
 
 NAMES = {}       # code -> 종목명
+ALERT_ON = []    # 알림 켠 종목 코드 (순서대로) : 모든 알림 끝에 지금 가격을 함께 붙임
+
+
+def board(skip=None):
+    """알림 켠 종목들의 지금 가격·등락률 한 줄씩"""
+    out = []
+    for c in ALERT_ON:
+        if c == skip or c not in PRICE_INFO:
+            continue
+        px, chg = PRICE_INFO[c]
+        arrow = "▲" if chg > 0 else "▼" if chg < 0 else "-"
+        out.append(f"{NAMES.get(c, c)} {money(c, px)} {arrow}{abs(chg):.2f}%")
+    return ("\n\n[지금 가격]\n" + "\n".join(out)) if out else ""
 
 
 def layout(title, message, code):
@@ -324,7 +337,7 @@ def layout(title, message, code):
     arrow = "▲" if chg > 0 else "▼" if chg < 0 else "-"
     kind = " ".join(title.replace(name, " ").replace(":", " ").split())
     tag = "red_circle" if chg > 0 else "large_blue_circle" if chg < 0 else "white_circle"
-    return f"{name} {px:,.0f} {arrow}{abs(chg):.2f}%", f"[{kind}] {message}", tag
+    return f"{name} {money(code, px)} {arrow}{abs(chg):.2f}%", f"[{kind}] {message}{board(code)}", tag
 
 
 def send_ntfy(topic, title, message, code=None, high=False, _laid=False):
@@ -496,6 +509,8 @@ def main():
             if base:
                 chart[s["code"]]["base"] = base
                 NAMES[s["code"]] = s["name"]
+                if s.get("alert", True) and s["code"] not in ALERT_ON:
+                    ALERT_ON.append(s["code"])
                 cur = closes[-1] if closes else candles[-1][4]
                 PRICE_INFO[s["code"]] = (cur, (cur - base) / base * 100)
         except Exception as e:  # 한 종목 실패해도 나머지는 계속
