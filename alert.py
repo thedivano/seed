@@ -423,8 +423,8 @@ def chart_extras(chart):
         time.sleep(0.3)
 
 
-MARKETS = [("KOSPI", "^KS11", "코스피"), ("KOSDAQ", "^KQ11", "코스닥"), ("SPX", "^GSPC", "S&P500"),
-           ("NDX", "^IXIC", "나스닥"), ("DJI", "^DJI", "다우"), ("USDKRW", "KRW=X", "원/달러")]
+MARKETS = [("KOSPI", "^KS11", "코스피"), ("KOSDAQ", "^KQ11", "코스닥"), ("USDKRW", "KRW=X", "원/달러"),
+           ("SPX", "^GSPC", "S&P500"), ("NDX", "^IXIC", "나스닥"), ("DJI", "^DJI", "다우")]
 
 
 def save_markets(now):
@@ -435,6 +435,10 @@ def save_markets(now):
             meta, rows = _yh(sym, "1d", "5m")
             px = meta.get("regularMarketPrice") or (rows[-1][4] if rows else None)
             prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+            if key in ("KOSPI", "KOSDAQ"):  # 한국 지수 값·전일 대비는 네이버가 정확 (야후는 전일값이 어긋날 때가 있음)
+                b = requests.get(f"https://m.stock.naver.com/api/index/{key}/basic", headers=UA, timeout=10).json()
+                px = float(str(b["closePrice"]).replace(",", ""))
+                prev = px - float(str(b["compareToPreviousClosePrice"]).replace(",", ""))
             if not px or not prev:
                 continue
             out.append({"key": key, "name": name, "px": round(px, 2), "prev": round(prev, 2),
