@@ -23,6 +23,7 @@ MIN_VALUE = 10e8     # 그날 거래대금이 이 금액(원) 이상인 종목�
 LOOKBACK = 5         # 최근 며칠치 신호를 확인할지 (빠진 날 메우기)
 KEEP_DAYS = 30       # 이 기간이 지난 발굴 기록은 지움
 LIMIT_FROM = "20261101"  # 상한가 종목은 이 날부터 모음
+LIMIT_MIN_AVG_VOL = 100_000  # 상한가 종목도 직전 20일 평균 거래량이 이 주식 수 이상인 것만
 LIMIT_PCT = 29.5     # 전일 종가 대비 이 % 이상으로 마감하면 상한가로 봄 (가격제한폭 30%, 호가 단위 내림 감안)
 FOUND = Path(__file__).parent / "state" / "found.json"
 
@@ -95,6 +96,8 @@ def check(code, name, mkt, shares=0):
         ma20 = sum(closes) / len(closes)
         lower = ma20 - 2 * statistics.pstdev(closes)
         avg = sum(vols) / len(vols) if vols else 0
+        if avg < LIMIT_MIN_AVG_VOL:
+            continue
         hits.append({
             "id": f"up_{code}_{date}", "kind": "up", "prev": c[i - 1][0], "code": code, "name": name, "market": mkt,
             "date": date, "close": int(close), "chg": round((close - prev) / prev * 100, 2),
@@ -252,7 +255,7 @@ def main():
             x["nowDate"], now, x["day"] = last[x["code"]]
             x["now"] = int(now)
     cut = (datetime.now(KST) - timedelta(days=KEEP_DAYS)).strftime("%Y%m%d")
-    items = sorted((x for x in old.values() if x["date"] >= cut and (x.get("kind") == "up" or x.get("volx", 0) >= VOL_X and x.get("mcap", 0) >= MIN_MCAP and x.get("vol", 0) / max(x.get("volx", 1), 1e-9) >= MIN_AVG_VOL)), key=lambda x: (x["date"], x["volx"]), reverse=True)
+    items = sorted((x for x in old.values() if x["date"] >= cut and (x.get("kind") == "up" and x.get("vol", 0) / max(x.get("volx", 0), 1e-9) >= LIMIT_MIN_AVG_VOL or x.get("kind") != "up" and x.get("volx", 0) >= VOL_X and x.get("mcap", 0) >= MIN_MCAP and x.get("vol", 0) / max(x.get("volx", 1), 1e-9) >= MIN_AVG_VOL)), key=lambda x: (x["date"], x["volx"]), reverse=True)
 
     FOUND.parent.mkdir(exist_ok=True)
     FOUND.write_text(json.dumps({"updatedAt": datetime.now(KST).isoformat(timespec="minutes"), "items": items},
