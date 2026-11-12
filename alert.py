@@ -423,7 +423,36 @@ def chart_extras(chart):
         time.sleep(0.3)
 
 
+MARKETS = [("KOSPI", "^KS11", "코스피"), ("KOSDAQ", "^KQ11", "코스닥"), ("SPX", "^GSPC", "S&P500"),
+           ("NDX", "^IXIC", "나스닥"), ("DJI", "^DJI", "다우"), ("USDKRW", "KRW=X", "원/달러")]
+
+
+def save_markets(now):
+    """종합주가지수·환율: 지금 값, 전일 대비, 오늘 흐름(5분) → data/markets.json"""
+    out = []
+    for key, sym, name in MARKETS:
+        try:
+            meta, rows = _yh(sym, "1d", "5m")
+            px = meta.get("regularMarketPrice") or (rows[-1][4] if rows else None)
+            prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+            if not px or not prev:
+                continue
+            out.append({"key": key, "name": name, "px": round(px, 2), "prev": round(prev, 2),
+                        "chg": round((px - prev) / prev * 100, 2), "t": rows[-1][0] if rows else "",
+                        "sp": [round(r[4], 2) for r in rows][-80:]})
+        except Exception as e:
+            print(f"[지수 실패] {name}: {e}")
+    if out:
+        (CHART.parent / "markets.json").write_text(
+            json.dumps({"updatedAt": now.isoformat(timespec="minutes"), "items": out}, ensure_ascii=False), encoding="utf-8")
+
+
 def save_chart(chart, now):
+    try:
+        CHART.parent.mkdir(exist_ok=True)
+        save_markets(now)
+    except Exception as e:
+        print("[지수 실패]", e)
     if not chart:
         return
     CHART.parent.mkdir(exist_ok=True)
