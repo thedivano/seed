@@ -427,6 +427,18 @@ MARKETS = [("KOSPI", "^KS11", "코스피"), ("KOSDAQ", "^KQ11", "코스닥"), ("
            ("SPX", "^GSPC", "S&P500"), ("NDX", "^IXIC", "나스닥"), ("DJI", "^DJI", "다우")]
 
 
+def _bars15(rows):
+    """5분봉 -> 15분봉 [[시,고,저,종], ...] (지수 띠의 작은 봉 차트용)"""
+    out, key = [], None
+    for t, o, h, l, c, v in rows:
+        k = t[:10] + f"{int(t[10:12]) // 15:02d}"
+        if k != key:
+            out.append([o, h, l, c]); key = k
+        else:
+            b = out[-1]; b[1], b[2], b[3] = max(b[1], h), min(b[2], l), c
+    return [[round(x, 2) for x in b] for b in out][-32:]
+
+
 def save_markets(now):
     """종합주가지수·환율: 지금 값, 전일 대비, 오늘 흐름(5분) → data/markets.json"""
     out = []
@@ -443,7 +455,7 @@ def save_markets(now):
                 continue
             out.append({"key": key, "name": name, "px": round(px, 2), "prev": round(prev, 2),
                         "chg": round((px - prev) / prev * 100, 2), "t": rows[-1][0] if rows else "",
-                        "sp": [round(r[4], 2) for r in rows][-80:]})
+                        "sp": [round(r[4], 2) for r in rows][-80:], "k": _bars15(rows)})
         except Exception as e:
             print(f"[지수 실패] {name}: {e}")
     if out:
