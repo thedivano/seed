@@ -76,6 +76,7 @@ def metrics(rows, shares=0):
         "val": round(sum(r[4] * r[5] for r in rows[-20:]) / 20 / 1e8, 1),
         "mcap": round(c[-1] * shares / 1e8) if shares else 0,
         "sp": [round(x, 2) for x in c[-21:]],
+        "k": [[round(r[1], 2), round(r[2], 2), round(r[3], 2), round(r[4], 2)] for r in rows[-20:]],  # 최근 20일 봉
     }
 
 
@@ -85,7 +86,7 @@ def _pack(name, members, label):
     lead = sorted(members, key=lambda t: t[2]["r20"], reverse=True)[:LEADERS]
     return {
         "theme": name, "n": len(members), "r1": med("r1"), "r5": med("r5"), "r20": med("r20"), "src": label,
-        "leaders": [{"code": c, "name": n, **{k: m[k] for k in ("c", "r1", "r5", "r20", "val", "mcap", "sp")}}
+        "leaders": [{"code": c, "name": n, **{k: m[k] for k in ("c", "r1", "r5", "r20", "val", "mcap", "sp", "k")}}
                     for c, n, m in lead],
     }
 
