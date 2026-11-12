@@ -1,0 +1,9 @@
+name: probe
+on: workflow_dispatch
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          for c in 425420 042700 036930 240810 039030 031980 327260 218410 043260 010120 298040 010060 009830 035900 041510 122870 352820 192820 108490 000990 035420; do
+            n=$(curl -s -A "Mozilla/5.0" "https://m.stock.naver.com/api/stock/$c/basic" | python3 -c "import json,sys;print(json.load(sys.stdin).get('stockName'))" 2>/dev/null); echo "NAME $c $n"; done
