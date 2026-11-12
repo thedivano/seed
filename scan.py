@@ -246,7 +246,9 @@ def main():
         ind, thm = group_map("industry"), group_map("theme")
         try:  # 테마 대장주 (한국: 네이버 테마, 미국: 정해 둔 테마)
             th = {"updatedAt": datetime.now(KST).isoformat(timespec="minutes"),
-                  "KR": themes.kr_themes(thm, met, names), "US": themes.us_themes(_yh)}
+                  "KR": themes.kr_curated(met, names), "KR_ALL": themes.kr_themes(thm, met, names),
+                  "US": themes.us_themes(_yh)}
+            print("한국 테마 종목 확인:", {t: [names.get(c, "??"+c) for c in cs] for t, cs in themes.KR_THEMES.items()})
             (FOUND.parent / "themes.json").write_text(json.dumps(th, ensure_ascii=False), encoding="utf-8")
             print("테마:", [t["theme"] for t in th["KR"][:8]], [t["theme"] for t in th["US"][:5]])
         except Exception as e:
