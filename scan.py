@@ -14,7 +14,8 @@ from pathlib import Path
 
 import requests
 
-from alert import KST, UA, fetch_candles
+from alert import KST, UA, _yh, fetch_candles
+import themes
 
 VOL_X = 5.0          # 거래량이 직전 20일 평균의 이 배수 이상
 MIN_AVG_VOL = 50_000  # 직전 20일 평균 거래량이 이 주식 수 이상
@@ -62,7 +63,7 @@ def check(code, name, mkt, shares=0):
     try:
         c = fetch_candles(code, days=200)
     except Exception:
-        return [], None
+        return [], None, None
     hits = []
     for back in range(LOOKBACK):
         i = len(c) - 1 - back
@@ -106,7 +107,7 @@ def check(code, name, mkt, shares=0):
         })
     # 미니 차트용 일봉 (최근 130일: 60봉 + 이동평균 60일 계산분) "날짜,시가,고가,저가,종가;..."
     day = ";".join(f"{r[0]},{int(r[1])},{int(r[2])},{int(r[3])},{int(r[4])},{int(r[5])}" for r in c[-130:]) if c else ""
-    return hits, ((c[-1][0], c[-1][4], day) if c else None)
+    return hits, ((c[-1][0], c[-1][4], day) if c else None), themes.metrics(c, shares)
 
 
 def reasons(code, date, prev):
@@ -223,8 +224,10 @@ def main():
 
     with ThreadPoolExecutor(8) as ex:
         res = list(ex.map(lambda a: check(*a), universe))
-    found = [h for hs, _ in res for h in hs]
-    last = {a[0]: lp for a, (_, lp) in zip(universe, res) if lp}  # 종목별 가장 최근 종가
+    found = [h for hs, _, _ in res for h in hs]
+    last = {a[0]: lp for a, (_, lp, _) in zip(universe, res) if lp}
+    met = {a[0]: m for a, (_, _, m) in zip(universe, res) if m}  # 테마 대장주 계산용
+    names = {a[0]: a[1] for a in universe}  # 종목별 가장 최근 종가
 
     old = {}
     if FOUND.exists():
@@ -241,6 +244,13 @@ def main():
             x["news"] = reasons(x["code"], x["date"], x["prev"])
     try:  # 어떤 관련주인지: 업종 1개 + 테마 최대 3개 (종목 수가 적은 테마일수록 구체적이라 앞에)
         ind, thm = group_map("industry"), group_map("theme")
+        try:  # 테마 대장주 (한국: 네이버 테마, 미국: 정해 둔 테마)
+            th = {"updatedAt": datetime.now(KST).isoformat(timespec="minutes"),
+                  "KR": themes.kr_themes(thm, met, names), "US": themes.us_themes(_yh)}
+            (FOUND.parent / "themes.json").write_text(json.dumps(th, ensure_ascii=False), encoding="utf-8")
+            print("테마:", [t["theme"] for t in th["KR"][:8]], [t["theme"] for t in th["US"][:5]])
+        except Exception as e:
+            print("테마 실패:", e)
         for x in old.values():
             if x["code"] in ind:
                 x["sector"] = ind[x["code"]][0][0]

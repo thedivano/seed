@@ -66,7 +66,7 @@ jobs:
         if: always()
         run: |
           [ -f data/chart.json ] || exit 0
-          mkdir -p /tmp/chart && cp data/*.json /tmp/chart/ && { [ -f state/found.json ] && cp state/found.json /tmp/chart/ || true; } && cd /tmp/chart
+          mkdir -p /tmp/chart && cp data/*.json /tmp/chart/ && { cp state/found.json state/themes.json /tmp/chart/ 2>/dev/null || true; } && cd /tmp/chart
           git init -q -b chart-data
           git add *.json
           git -c user.name=seed-bot -c user.email=seed-bot@users.noreply.github.com commit -qm "차트 데이터 $(TZ=Asia/Seoul date '+%m-%d %H:%M')"

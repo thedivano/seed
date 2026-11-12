@@ -34,7 +34,7 @@ jobs:
         run: |
           git config user.name "seed-bot"
           git config user.email "seed-bot@users.noreply.github.com"
-          git add state/found.json
+          git add state/found.json state/themes.json 2>/dev/null || git add state/found.json
           if ! git diff --cached --quiet; then
             git commit -qm "발굴 기록 업데이트"
             for i in 1 2 3; do git pull --rebase -X theirs -q origin main && git push -q && break; sleep 5; done
@@ -42,13 +42,13 @@ jobs:
 
       - name: 시드 페이지용 chart-data 브랜치에도 넣기
         run: |
-          cp state/found.json /tmp/found.json
+          cp state/found.json /tmp/found.json; cp state/themes.json /tmp/themes.json 2>/dev/null || true
           for i in 1 2 3; do
             rm -rf /tmp/cd
             git clone -q --depth 1 -b chart-data "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" /tmp/cd || exit 0
-            cp /tmp/found.json /tmp/cd/found.json
+            cp /tmp/found.json /tmp/cd/found.json; [ -f /tmp/themes.json ] && cp /tmp/themes.json /tmp/cd/themes.json
             cd /tmp/cd
-            git add found.json
+            git add found.json; [ -f themes.json ] && git add themes.json
             git diff --cached --quiet && exit 0
             git -c user.name=seed-bot -c user.email=seed-bot@users.noreply.github.com commit -qm "발굴 $(TZ=Asia/Seoul date '+%m-%d %H:%M')"
             git push -q && exit 0
