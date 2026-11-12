@@ -1,0 +1,17 @@
+name: probe
+on: workflow_dispatch
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          pip install -q requests matplotlib
+          curl -s -A "Mozilla/5.0" "https://m.stock.naver.com/api/index/KOSDAQ/basic" | head -c 700; echo
+          python3 -c "
+          import alert
+          for s in ('KOSPI','KOSDAQ'):
+            try:
+              r=alert.fetch_fchart(s,'minute',400); print(s,len(r),r[:1],r[-1:])
+            except Exception as e: print(s,'ERR',e)
+          "
