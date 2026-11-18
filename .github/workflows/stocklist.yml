@@ -1,0 +1,21 @@
+name: stocklist
+on: push
+permissions: {contents: write}
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install requests
+      - run: |
+          python - <<'PY'
+          import scan
+          out=[]
+          for m in ("KOSPI","KOSDAQ"):
+              out += [f"{c} {n}" for c,n,_ in scan.market_list(m)]
+          open("stocks.txt","w").write(";".join(out))
+          print(len(out))
+          PY
+      - run: |
+          git config user.name seed-bot; git config user.email seed-bot@users.noreply.github.com
+          git add stocks.txt; git commit -m "stock list"; git push
