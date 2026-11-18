@@ -1,0 +1,19 @@
+name: sector
+on: push
+permissions: {contents: write}
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install requests
+      - run: |
+          python - <<'PY'
+          import scan, json
+          m = scan.group_map("industry")
+          json.dump({c: v[0][0] for c, v in m.items() if v}, open("sector.json", "w"), ensure_ascii=False)
+          print(len(m))
+          PY
+      - run: |
+          git config user.name seed-bot; git config user.email seed-bot@users.noreply.github.com
+          git add sector.json; git commit -m "sector"; git push
