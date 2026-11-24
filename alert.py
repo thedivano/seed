@@ -123,7 +123,27 @@ def fetch_info(code, d):
                 info[t["code"]] = t.get("value", "")
     except Exception:
         pass
+    # 최근 5거래일 외국인·기관·개인 순매수(주) + 그날 종가: [[날짜, 외국인, 기관, 개인, 종가], ...] 최근 날짜가 앞
+    try:
+        rows = requests.get(f"https://m.stock.naver.com/api/stock/{code}/trend", params={"pageSize": 5},
+                            headers=UA, timeout=10).json()
+        flow = []
+        for r in (rows or [])[:5]:
+            q = [_int(r.get(k)) for k in ("foreignerPureBuyQuant", "organPureBuyQuant", "individualPureBuyQuant", "closePrice")]
+            if r.get("bizdate") and q[0] is not None:
+                flow.append([r["bizdate"], *q])
+        if flow:
+            info["flow"] = flow
+    except Exception:
+        pass
     INFO[code] = info
+
+
+def _int(v):
+    try:
+        return int(float(str(v).replace(",", "").replace("+", "")))
+    except (TypeError, ValueError):
+        return None
 
 
 def fetch_quote(code):
