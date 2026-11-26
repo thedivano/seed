@@ -192,17 +192,21 @@ def extra_info(x):
             return int(str(v).replace(",", "").replace("+", ""))
         except (TypeError, ValueError):
             return None
-    if "frg" not in x:
-        try:
-            rows = requests.get(f"https://m.stock.naver.com/api/stock/{x['code']}/trend", params={"pageSize": 40},
-                                headers=UA, timeout=10).json()
-            for r in rows or []:
-                if r.get("bizdate") == x["date"]:
-                    x["frg"], x["org"], x["ind"] = (n(r.get("foreignerPureBuyQuant")), n(r.get("organPureBuyQuant")),
-                                                    n(r.get("individualPureBuyQuant")))
-                    break
-        except Exception:
-            pass
+    # 최근 30거래일 외국인·기관·개인 순매수(주)와 그날 종가 -> 카드의 수급 차트. [[날짜, 외국인, 기관, 개인, 종가], ...] 오래된 날이 앞
+    try:
+        rows = requests.get(f"https://m.stock.naver.com/api/stock/{x['code']}/trend", params={"pageSize": 30},
+                            headers=UA, timeout=10).json()
+        flow = []
+        for r in rows or []:
+            q = [n(r.get(k)) for k in ("foreignerPureBuyQuant", "organPureBuyQuant", "individualPureBuyQuant", "closePrice")]
+            if r.get("bizdate") and q[0] is not None:
+                flow.append([r["bizdate"], *q])
+            if r.get("bizdate") == x["date"] and "frg" not in x:
+                x["frg"], x["org"], x["ind"] = q[0], q[1], q[2]
+        if flow:
+            x["flow"] = sorted(flow)
+    except Exception:
+        pass
     # 실적: 매출액·영업이익(억 원) 연간·분기, 증권사 전망치(컨센서스)는 est=1
     fin = {}
     for per, key in (("annual", "y"), ("quarter", "q")):
