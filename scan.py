@@ -203,6 +203,25 @@ def extra_info(x):
                     break
         except Exception:
             pass
+    # 실적: 매출액·영업이익(억 원) 연간·분기, 증권사 전망치(컨센서스)는 est=1
+    fin = {}
+    for per, key in (("annual", "y"), ("quarter", "q")):
+        try:
+            d = requests.get(f"https://m.stock.naver.com/api/stock/{x['code']}/finance/{per}", headers=UA, timeout=10).json()
+            fi = d.get("financeInfo") or {}
+            rows = {r.get("title"): r.get("columns") or {} for r in fi.get("rowList") or []}
+            out = []
+            for t in fi.get("trTitleList") or []:
+                k = t.get("key")
+                rv, op = n((rows.get("매출액") or {}).get(k, {}).get("value")), n((rows.get("영업이익") or {}).get(k, {}).get("value"))
+                if rv is not None or op is not None:
+                    out.append([k, rv, op, 1 if t.get("isConsensus") == "Y" else 0])
+            if out:
+                fin[key] = out
+        except Exception:
+            pass
+    if fin:
+        x["fin"] = fin
     try:
         d = requests.get(f"https://m.stock.naver.com/api/stock/{x['code']}/integration", headers=UA, timeout=10).json()
         for t in d.get("totalInfos") or []:
