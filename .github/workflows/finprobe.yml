@@ -1,0 +1,17 @@
+name: finprobe
+on: push
+permissions: {contents: write}
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          UA='Mozilla/5.0'
+          for c in 019210 005930; do
+            curl -s -A "$UA" "https://m.stock.naver.com/api/stock/$c/finance/annual" > fin_annual_$c.json
+            curl -s -A "$UA" "https://m.stock.naver.com/api/stock/$c/finance/quarter" > fin_quarter_$c.json
+          done
+          ls -la fin_*
+          git config user.name seed-bot; git config user.email seed-bot@users.noreply.github.com
+          git add fin_*.json; git commit -m probe; git push
