@@ -1,9 +1,10 @@
 {
   "2026-11-28": {
     "step:SPCX": 1,
-    "step:SKHY": 1,
+    "step:SKHY": 2,
     "_checked:KR": "202611271959",
-    "_checked:US": "202611271150",
-    "step:AMD": 1
+    "_checked:US": "202611271302",
+    "step:AMD": 1,
+    "lvl:SPCX:20일선": "2026-11-28T03:02+09:00"
   }
 }
